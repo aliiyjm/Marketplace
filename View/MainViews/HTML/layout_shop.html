@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block layout %}
+  {% include "partials/header.html" %}
+  <main id="main" class="container page">
+    {% include "partials/flash.html" %}
+    {% block content %}{% endblock %}
+  </main>
+  {% include "partials/footer.html" %}
+{% endblock %}

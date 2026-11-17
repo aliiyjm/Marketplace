@@ -1,0 +1,105 @@
+{% extends "layout_panel.html" if admin else "layout_shop.html" %}
+{% import "icons.html" as ic %}
+{% from "partials/garment.html" import garment %}
+{% from "partials/status.html" import status_badge %}
+{% block title %}Order {{ order.code }}{% endblock %}
+{% block content %}
+{% if admin %}<a class="back-link" href="{{ url_for('admin.orders') }}">← All orders</a>
+{% else %}<a class="back-link" href="{{ url_for('account.orders') }}">← Back to my orders</a>{% endif %}
+
+<div class="row-between wrap">
+  <div>
+    <h1 class="h-page">Order {{ order.code }}</h1>
+    <p class="muted">Placed on {{ order.created_at|datetime }}{% if admin %} · by {{ order.buyer_name }}{% endif %}</p>
+  </div>
+  {{ status_badge(order.status) }}
+</div>
+
+<div class="two-col">
+  <div class="two-col__main stack-lg">
+    <section class="card card--flush table-wrap" aria-labelledby="items-h">
+      <h2 id="items-h" class="h-card card__title">Items</h2>
+      <table class="table">
+        <thead><tr><th scope="col">Product</th><th scope="col">Variant</th><th scope="col" class="num">Qty</th><th scope="col" class="num">Unit price</th><th scope="col" class="num">Subtotal</th></tr></thead>
+        <tbody>
+        {% for i in order.items %}
+          <tr>
+            <td><span class="cell-product">{{ garment(i.kind, i.color_key, "xs") }}<a href="{{ url_for('shop.product', product_id=i.product_id) }}">{{ i.name }}</a></span></td>
+            <td class="muted">Size {{ i.size }} · {{ i.color }}</td>
+            <td class="num">{{ i.quantity }}</td>
+            <td class="num">{{ i.unit_price|money }}</td>
+            <td class="num strong">{{ i.subtotal|money }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <dl class="totals">
+        <div><dt>Subtotal</dt><dd>{{ order.subtotal|money }}</dd></div>
+        <div><dt>IVA (16%)</dt><dd>{{ order.tax_amount|money }}</dd></div>
+        <div class="totals__grand"><dt>Total</dt><dd>{{ order.total_amount|money }}</dd></div>
+      </dl>
+    </section>
+
+    <div class="grid-2">
+      <section class="card stack-sm">
+        <h2 class="h-small">Payment</h2>
+        {% if order.payment %}
+          <p>{{ order.payment.label }}</p>
+          <span class="status status--{{ 'paid' if order.payment.status == 'Approved' else ('cancelled' if order.payment.status in ('Cancelled', 'Refunded') else 'pending') }}">{{ order.payment.status }}</span>
+        {% endif %}
+      </section>
+      <section class="card stack-sm">
+        <h2 class="h-small">Shipping address</h2>
+        {% if order.shipping %}<p>{{ order.shipping.street }}<br>{{ order.shipping.city }}, {{ order.shipping.state }}<br>{{ order.shipping.zip_code }}</p>{% endif %}
+      </section>
+    </div>
+  </div>
+
+  <aside class="two-col__side stack-lg">
+    <section class="card" aria-labelledby="hist-h">
+      <h2 id="hist-h" class="h-card">Status history</h2>
+      <ol class="timeline">
+        {% for h in order.history %}
+          <li class="timeline__item {{ 'is-current' if loop.last and order.status not in ('Delivered', 'Cancelled') else 'is-done' }}{% if h.new_status == 'Cancelled' %} is-cancelled{% endif %}">
+            <span class="timeline__dot" aria-hidden="true"></span>
+            <div>
+              <strong>{{ {'Pending': 'Order placed', 'Paid': 'Payment approved', 'Shipped': 'Shipped', 'Delivered': 'Delivered', 'Cancelled': 'Cancelled'}[h.new_status] }}</strong>
+              <span class="muted small">{{ h.old_status or '—' }} → {{ h.new_status }}</span>
+              <span class="muted small">{{ h.changed_at|datetime }}</span>
+            </div>
+          </li>
+        {% endfor %}
+        {% for s in ['Paid', 'Shipped', 'Delivered'] if order.status not in ('Cancelled',) and s not in (order.history|map(attribute='new_status')|list) %}
+          <li class="timeline__item is-next">
+            <span class="timeline__dot" aria-hidden="true"></span>
+            <div><strong>{{ s }}</strong><span class="muted small">Waiting</span></div>
+          </li>
+        {% endfor %}
+      </ol>
+    </section>
+
+    {% if admin and order.next_statuses %}
+    <section class="card stack-sm" aria-labelledby="change-h">
+      <h2 id="change-h" class="h-small">Change status</h2>
+      <form method="post" action="{{ url_for('admin.change_status', order_id=order.order_id) }}" class="actions-row">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        {% for s in order.next_statuses %}
+          <button type="submit" name="new_status" value="{{ s }}" class="btn {{ 'btn--danger' if s == 'Cancelled' else 'btn--primary' }} btn--sm">Mark as {{ s }}</button>
+        {% endfor %}
+      </form>
+      <p class="muted small">Cancelling returns the stock. A paid order is refunded.</p>
+    </section>
+    {% endif %}
+
+    <section class="card stack-sm">
+      <h2 class="h-small h-icon">{{ ic.file() }}Invoice</h2>
+      {% if order.invoice %}
+        <p class="muted small">{{ order.invoice.code }} · issued {{ order.invoice.issued_at|date }}</p>
+        <a class="btn btn--outline btn--block" href="{{ url_for('account.invoice', order_id=order.order_id) }}">{{ ic.download() }}View / print</a>
+      {% else %}
+        <p class="muted small">Issued when the payment is confirmed.</p>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+{% endblock %}

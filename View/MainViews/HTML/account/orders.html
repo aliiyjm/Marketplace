@@ -1,0 +1,42 @@
+{% extends "layout_shop.html" %}
+{% import "icons.html" as ic %}
+{% from "partials/status.html" import status_badge %}
+{% block title %}My orders{% endblock %}
+{% block content %}
+<div class="row-between wrap">
+  <h1 class="h-page">My orders</h1>
+  <form class="search-inline" role="search" method="get" action="{{ url_for('account.orders') }}">
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    <label class="sr-only" for="order-q">Search by order number</label>
+    <input id="order-q" class="input" type="search" name="q" maxlength="20" value="{{ q }}" placeholder="Search by order number">
+    <button class="btn btn--dark btn--icon" type="submit" aria-label="Search">{{ ic.search(18) }}</button>
+  </form>
+</div>
+
+<nav class="tabs" aria-label="Filter by status">
+  <a href="{{ url_for('account.orders') }}" {% if not status %}aria-current="page"{% endif %}>All</a>
+  {% for s in statuses %}
+    <a href="{{ url_for('account.orders', status=s) }}" {% if status == s %}aria-current="page"{% endif %}>{{ s }}</a>
+  {% endfor %}
+</nav>
+
+<div class="card card--flush table-wrap">
+  <table class="table">
+    <thead><tr><th scope="col">Order</th><th scope="col">Date</th><th scope="col">Items</th><th scope="col" class="num">Total</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>
+    {% for o in orders %}
+      <tr>
+        <td class="strong">{{ o.code }}</td>
+        <td class="muted">{{ o.created_at|date }}</td>
+        <td>{{ o.item_count }} item{{ 's' if o.item_count != 1 }}</td>
+        <td class="num strong">{{ o.total_amount|money }}</td>
+        <td>{{ status_badge(o.status) }}</td>
+        <td class="num"><a class="btn btn--outline btn--sm" href="{{ url_for('account.order_detail', order_id=o.order_id) }}">View details</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">{% if status or q %}No orders match this filter.{% else %}You have not placed any orders yet. <a href="{{ url_for('shop.home') }}">Start shopping</a>.{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

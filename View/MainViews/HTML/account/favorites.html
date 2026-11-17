@@ -1,0 +1,20 @@
+{% extends "layout_shop.html" %}
+{% from "partials/product_card.html" import product_card %}
+{% block title %}Favorites{% endblock %}
+{% block content %}
+<div class="row-between wrap">
+  <h1 class="h-page">Favorites <span class="muted h-sub">({{ products|length }})</span></h1>
+  <p class="muted small">Tap the heart again to remove a product.</p>
+</div>
+{% if products %}
+  <div class="grid-cards">
+    {% for p in products %}{{ product_card(p, True, request.path) }}{% endfor %}
+  </div>
+{% else %}
+  <div class="card empty-state">
+    <p class="empty-state__title">No favorites yet</p>
+    <p class="muted">Tap the heart on any product to save it here.</p>
+    <a class="btn btn--dark" href="{{ url_for('shop.home') }}">Browse the catalog</a>
+  </div>
+{% endif %}
+{% endblock %}

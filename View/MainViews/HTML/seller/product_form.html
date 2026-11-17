@@ -1,0 +1,120 @@
+{% extends "layout_panel.html" %}
+{% import "icons.html" as ic %}
+{% block title %}{{ 'Edit product' if product else 'Add product' }}{% endblock %}
+{% block content %}
+<a class="back-link" href="{{ url_for('seller.products') }}">← Back to my products</a>
+<div class="row-between wrap">
+  <h1 class="h-page">{{ 'Edit product' if product else 'Add product' }}</h1>
+  {% if product %}<span class="mono muted">{{ product.product_id }}</span>{% endif %}
+</div>
+
+<form method="post" class="two-col js-product-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="two-col__main stack-lg">
+    <section class="card stack">
+      <h2 class="h-card">Basic information</h2>
+      <label class="field">Product name
+        <input class="input" type="text" name="name" required maxlength="120" value="{{ form.get('name', '') }}">
+      </label>
+      <label class="field">Description
+        <textarea class="textarea" name="description" rows="4" maxlength="2000">{{ form.get('description', '') }}</textarea>
+      </label>
+      <label class="field">Category
+        <select class="select" name="category_id" required>
+          <option value="">Choose…</option>
+          {% for cid, label in categories %}
+            <option value="{{ cid }}" {% if form.get('category_id') == cid|string %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </section>
+
+    <section class="card stack">
+      <h2 class="h-card">Variants</h2>
+      <label class="field">Sizes
+        <input class="input" type="text" name="sizes" required maxlength="300" value="{{ form.get('sizes', '') }}" placeholder="XS, S, M, L, XL">
+        <span class="hint">Separate with commas. Shoes use MX sizes (22–29). Use “One size” for accessories.</span>
+      </label>
+      <label class="field">Colors
+        <input class="input" type="text" name="colors" required maxlength="400" value="{{ form.get('colors', '') }}" placeholder="Black, Navy, Cream">
+        <span class="hint">The first color is the one shown in the catalog.</span>
+      </label>
+    </section>
+
+    <section class="card stack">
+      <h2 class="h-card">Price and stock</h2>
+      <div class="grid-3">
+        <label class="field">Price (MXN)
+          <input class="input" type="number" name="price" min="0.01" step="0.01" required value="{{ form.get('price', '') }}">
+        </label>
+        <label class="field">Stock
+          <input class="input" type="number" name="stock" min="0" step="1" required value="{{ form.get('stock', '') }}">
+        </label>
+        <label class="field">Alert me below
+          <input class="input" type="number" name="threshold_limit" min="0" step="1" required value="{{ form.get('threshold_limit', '') }}">
+        </label>
+      </div>
+      <p class="hint">“Alert me below” sets the threshold for the stock alerts on your dashboard.</p>
+    </section>
+
+    <section class="card stack" aria-labelledby="attr-h">
+      <div class="row-between wrap">
+        <h2 id="attr-h" class="h-card">Attributes</h2>
+        <span class="muted small">Only the ones that apply (saved as flexible JSON in DynamoDB)</span>
+      </div>
+      <div class="attr-list js-attr-list">
+        {% for key, value in form.get('attrs', []) %}
+          <div class="attr-row">
+            <input class="input" type="text" name="attr_key" aria-label="Attribute name" maxlength="40" value="{{ key }}" placeholder="Name">
+            <input class="input" type="text" name="attr_value" aria-label="Attribute value" maxlength="120" value="{{ value }}" placeholder="Value">
+            <button type="button" class="btn btn--icon btn--ghost-danger js-attr-remove" aria-label="Remove attribute">{{ ic.trash() }}</button>
+          </div>
+        {% endfor %}
+        {% for _ in range(2) %}
+          <div class="attr-row">
+            <input class="input" type="text" name="attr_key" aria-label="Attribute name" maxlength="40" placeholder="Name">
+            <input class="input" type="text" name="attr_value" aria-label="Attribute value" maxlength="120" placeholder="Value">
+            <button type="button" class="btn btn--icon btn--ghost-danger js-attr-remove" aria-label="Remove attribute">{{ ic.trash() }}</button>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="actions-row">
+        <button type="button" class="btn btn--outline btn--sm js-attr-add">{{ ic.plus(16) }}Add attribute</button>
+        <span class="muted small">Ideas:</span>
+        {% for name in ["Material", "Fit", "Care", "Origin", "Length", "Closure"] %}
+          <button type="button" class="chip-btn js-attr-suggest" data-key="{{ name }}">+ {{ name }}</button>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+
+  <aside class="two-col__side stack-lg">
+    <section class="card stack">
+      <label class="check check--strong"><input type="checkbox" name="visible" value="1" {% if form.get('visible') %}checked{% endif %}>Visible in the catalog</label>
+      <p class="hint">Unchecked = draft. Only you can see drafts.</p>
+      <button type="submit" class="btn btn--primary btn--block btn--lg">{{ 'Save changes' if product else 'Create product' }}</button>
+      <a class="btn btn--outline btn--block" href="{{ url_for('seller.products') }}">Cancel</a>
+      {% if product %}
+        <a class="center small text-danger" href="{{ url_for('seller.delete_product', product_id=product.product_id) }}">Delete this product</a>
+      {% endif %}
+    </section>
+    {% if preview %}
+    <section class="card stack-sm">
+      <h2 class="h-small">Saved in DynamoDB as</h2>
+      <pre class="json-preview">{{ preview }}</pre>
+    </section>
+    {% endif %}
+    {% if product %}
+    <a class="btn btn--outline btn--block" href="{{ url_for('shop.product', product_id=product.product_id) }}">View in the store</a>
+    {% endif %}
+  </aside>
+</form>
+
+<template id="attr-row-template">
+  <div class="attr-row">
+    <input class="input" type="text" name="attr_key" aria-label="Attribute name" maxlength="40" placeholder="Name">
+    <input class="input" type="text" name="attr_value" aria-label="Attribute value" maxlength="120" placeholder="Value">
+    <button type="button" class="btn btn--icon btn--ghost-danger js-attr-remove" aria-label="Remove attribute">{{ ic.trash() }}</button>
+  </div>
+</template>
+{% endblock %}

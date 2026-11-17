@@ -1,0 +1,37 @@
+{# Product placeholder: a garment silhouette painted in the product's main color.
+   `kind` and `color_key` come from a fixed list (see Seed.py), so they are safe
+   as CSS class names; unknown values fall back to a gray t-shirt. #}
+{% macro garment(kind, color_key, size="md") -%}
+{% set k = kind if kind in ["tshirt", "dress", "pants", "jacket", "shoe", "bag", "cap", "glasses", "belt"] else "tshirt" %}
+<div class="garment garment--{{ size }} sw-{{ color_key|e }}" aria-hidden="true">
+  <svg viewBox="0 0 64 64" focusable="false">
+  {%- if k == "tshirt" %}
+    <path class="g-fill" d="M23 9 12 14 5 26l8 5 4-6v30h30V25l4 6 8-5-7-12-11-5c-1.5 4-5 7-9 7s-7.5-3-9-7z"/>
+  {%- elif k == "dress" %}
+    <path class="g-fill" d="M25 7h14l-1.5 9 5.5 5-3 6 11 31H13l11-31-3-6 5.5-5z"/>
+    <path class="g-line" d="M22 27h20"/>
+  {%- elif k == "pants" %}
+    <path class="g-fill" d="M17 7h30l3 51H39l-7-33-7 33H14z"/>
+    <path class="g-line" d="M17 13h30"/>
+  {%- elif k == "jacket" %}
+    <path class="g-fill" d="M23 8 10 13 5 52h8l3-24v30h32V28l3 24h8L54 13 41 8c-2 4-5 6-9 6s-7-2-9-6z"/>
+    <path class="g-line" d="M32 14v44"/>
+  {%- elif k == "shoe" %}
+    <path class="g-fill" d="M5 44c0-7 2-15 6-19h9c3 5 8 8 15 9 9 1 16 4 22 10v6H5z"/>
+    <path class="g-sole" d="M5 50h52v5H5z"/>
+  {%- elif k == "bag" %}
+    <path class="g-handle" d="M24 26v-6a8 8 0 0 1 16 0v6"/>
+    <path class="g-fill" d="M13 24h38l3 32H10z"/>
+  {%- elif k == "cap" %}
+    <path class="g-fill" d="M10 42c0-13 10-23 22-23s22 10 22 23z"/>
+    <path class="g-fill" d="M30 42h28c0 4-4 7-9 7H30z"/>
+  {%- elif k == "glasses" %}
+    <path class="g-fill" d="M7 31a10 10 0 1 0 20 0 10 10 0 1 0-20 0zM37 31a10 10 0 1 0 20 0 10 10 0 1 0-20 0z"/>
+    <path class="g-handle" d="M27 30c2-3 8-3 10 0"/>
+  {%- elif k == "belt" %}
+    <path class="g-fill" d="M4 27h56v10H4z"/>
+    <path class="g-handle" d="M25 24h12v16H25z"/>
+  {%- endif %}
+  </svg>
+</div>
+{%- endmacro %}

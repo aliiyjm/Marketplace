@@ -1,0 +1,59 @@
+{% extends "layout_panel.html" %}
+{% import "icons.html" as ic %}
+{% block title %}Categories{% endblock %}
+{% block content %}
+<h1 class="h-page">Categories</h1>
+<div class="two-col">
+  <section class="card card--flush table-wrap two-col__main" aria-label="Category tree">
+    <table class="table table--compact">
+      <thead><tr><th scope="col">Name</th><th scope="col">Slug</th><th scope="col" class="num">Products</th><th scope="col">Active</th><th scope="col" class="num">Actions</th></tr></thead>
+      <tbody>
+      {% for c in rows %}
+        <tr class="{{ 'tree-parent' if c.depth == 0 else 'tree-child' }}">
+          <td>{% if c.depth %}<span class="tree-mark" aria-hidden="true">└</span>{% endif %}{{ c.name }}</td>
+          <td class="mono muted">{{ c.slug }}</td>
+          <td class="num">{{ "{:,}".format(c.product_count) }}</td>
+          <td>
+            <form method="post" action="{{ url_for('admin.toggle_category', category_id=c.category_id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="switch {% if c.is_active %}is-on{% endif %}" role="switch" aria-checked="{{ 'true' if c.is_active else 'false' }}" aria-label="Active: {{ c.name }}"><span></span></button>
+            </form>
+          </td>
+          <td class="num"><a class="btn btn--icon btn--yellow" href="{{ url_for('admin.edit_category', category_id=c.category_id) }}" aria-label="Edit {{ c.name }}">{{ ic.edit() }}</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <aside class="card two-col__side stack" aria-labelledby="cat-form-h">
+    <h2 id="cat-form-h" class="h-card">{{ 'Edit “' ~ editing.name ~ '”' if editing else 'New category' }}</h2>
+    <form method="post" action="{{ url_for('admin.edit_category', category_id=editing.category_id) if editing else url_for('admin.categories') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label class="field">Name
+        <input class="input" type="text" name="name" required maxlength="60" value="{{ form.get('name', '') }}">
+      </label>
+      <label class="field">Slug
+        <input class="input mono" type="text" name="slug" required maxlength="60" pattern="[a-z0-9]+(-[a-z0-9]+)*" value="{{ form.get('slug', '') }}">
+        <span class="hint">Lowercase letters, numbers and dashes. Used in the URL.</span>
+      </label>
+      <label class="field">Parent category
+        <select class="select" name="parent_id">
+          <option value="">None (top level)</option>
+          {% for pid, pname in parents %}
+            {% if not editing or pid != editing.category_id %}
+            <option value="{{ pid }}" {% if form.get('parent_id') == pid|string %}selected{% endif %}>{{ pname }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="is_active" value="1" {% if form.get('is_active') %}checked{% endif %}>Active</label>
+      <div class="actions-row actions-row--end">
+        {% if editing %}<a class="btn btn--outline" href="{{ url_for('admin.categories') }}">Cancel</a>{% endif %}
+        <button type="submit" class="btn btn--primary">{{ 'Save category' if editing else 'Create category' }}</button>
+      </div>
+    </form>
+    <p class="muted small">Hiding a category hides its products from the catalog; nothing is deleted.</p>
+  </aside>
+</div>
+{% endblock %}

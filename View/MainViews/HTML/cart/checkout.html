@@ -1,0 +1,89 @@
+{% extends "layout_shop.html" %}
+{% import "icons.html" as ic %}
+{% from "partials/garment.html" import garment %}
+{% block title %}Checkout{% endblock %}
+{% block content %}
+{% set selected = form.get('method') or 'card' %}
+<div class="row-between wrap">
+  <h1 class="h-page">Checkout</h1>
+  <ol class="steps" aria-label="Progress">
+    <li class="step is-done">{{ ic.check(16) }}Cart</li>
+    <li class="step is-current" aria-current="step">2 · Shipping &amp; payment</li>
+    <li class="step">3 · Confirmation</li>
+  </ol>
+</div>
+
+<form method="post" action="{{ url_for('cart.checkout') }}" class="two-col" autocomplete="on">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="two-col__main stack-lg">
+    <section class="card stack" aria-labelledby="ship-h">
+      <h2 id="ship-h" class="h-card h-icon">{{ ic.truck() }}Shipping address</h2>
+      <label class="field">Street and number
+        <input class="input" type="text" name="street" autocomplete="street-address" required maxlength="120" value="{{ form.get('street', '') }}">
+      </label>
+      <div class="grid-3">
+        <label class="field">City
+          <input class="input" type="text" name="city" autocomplete="address-level2" required maxlength="60" value="{{ form.get('city', '') }}">
+        </label>
+        <label class="field">State
+          <select class="select" name="state" autocomplete="address-level1" required>
+            <option value="">Choose…</option>
+            {% for s in states %}<option {% if form.get('state') == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="field">ZIP code
+          <input class="input" type="text" name="zip_code" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="postal-code" required value="{{ form.get('zip_code', '') }}">
+        </label>
+      </div>
+    </section>
+
+    <section class="card stack" aria-labelledby="pay-h">
+      <h2 id="pay-h" class="h-card h-icon">{{ ic.card() }}Payment method</h2>
+      <fieldset class="pay-methods js-pay-methods">
+        <legend class="sr-only">Payment method</legend>
+        {% for key, (label, hint) in methods.items() %}
+          <label class="pay-option">
+            <input type="radio" name="method" value="{{ key }}" {% if selected == key %}checked{% endif %} required>
+            <span><strong>{{ label }}</strong><span class="muted small">{{ hint }}</span></span>
+          </label>
+        {% endfor %}
+      </fieldset>
+      <div class="card-fields stack" data-radio="method" data-show-when="card">
+        <label class="field">Card number
+          <input class="input mono" type="text" name="card_number" inputmode="numeric" autocomplete="cc-number" maxlength="23" placeholder="1234 5678 9012 3456">
+        </label>
+        <div class="grid-2">
+          <label class="field">Expiry
+            <input class="input" type="text" name="expiry" autocomplete="cc-exp" maxlength="7" placeholder="MM/YY">
+          </label>
+          <label class="field">CVV
+            <input class="input" type="password" name="cvv" inputmode="numeric" autocomplete="cc-csc" maxlength="4" placeholder="•••">
+          </label>
+        </div>
+      </div>
+      <p class="info-box" data-radio="method" data-show-when="spei cash">You will get the payment reference after placing the order. The order stays <strong>Pending</strong> until the payment is confirmed.</p>
+      <p class="note">{{ ic.lock() }}Card data goes to the payment provider only. We keep the method and the last 4 digits.</p>
+    </section>
+  </div>
+
+  {% set subtotal, tax, total = cart.totals %}
+  <aside class="card two-col__side summary" aria-labelledby="sum-h">
+    <h2 id="sum-h" class="h-card">Order summary</h2>
+    <ul class="mini-lines">
+      {% for line in cart.lines %}
+        <li>{{ garment(line.product.kind, line.product.color_key, "xs") }}
+          <span class="mini-lines__name">{{ line.product.name }}<span class="muted small">Size {{ line.size }} · {{ line.color }} · × {{ line.qty }}</span></span>
+          <strong>{{ line.line_total|money }}</strong></li>
+      {% endfor %}
+    </ul>
+    <dl class="summary__list">
+      <div><dt>Subtotal</dt><dd>{{ subtotal|money }}</dd></div>
+      <div><dt>IVA (16%)</dt><dd>{{ tax|money }}</dd></div>
+      <div><dt>Shipping</dt><dd class="text-ok">Free</dd></div>
+      <div class="summary__total"><dt>Total</dt><dd>{{ total|money }}</dd></div>
+    </dl>
+    <button type="submit" class="btn btn--primary btn--block btn--lg">Place order · {{ total|money }}</button>
+    <a class="center small" href="{{ url_for('cart.view') }}">Back to cart</a>
+  </aside>
+</form>
+{% endblock %}

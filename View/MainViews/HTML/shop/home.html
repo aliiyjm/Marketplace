@@ -1,0 +1,109 @@
+{% extends "layout_shop.html" %}
+{% from "partials/product_card.html" import product_card %}
+{% from "partials/pagination.html" import pagination %}
+{% set q = page.query %}
+{% block title %}{{ page.category.name if page.category else 'Shop clothing, shoes and accessories' }}{% endblock %}
+{% block content %}
+
+{% if not q.q and not q.category and page.page == 1 %}
+<section class="hero">
+  <div class="hero__text">
+    <p class="hero__eyebrow">Independent fashion sellers</p>
+    <h1>Find your style in more than 17,000 pieces</h1>
+    <p>Clothing, shoes and accessories from Mexican stores. Secure checkout and an invoice for every order.</p>
+  </div>
+  <div class="hero__actions">
+    <a class="btn btn--yellow" href="#catalog">Shop the catalog</a>
+    <a class="btn btn--outline-light" href="{{ url_for('auth.access') }}#register">Open your store</a>
+  </div>
+</section>
+<nav class="cat-tiles" aria-label="Shop by category">
+  {% for c in top_categories %}
+    <a class="cat-tile cat-tile--{{ c.slug }}" href="{{ url_for('shop.home', cat=c.slug) }}"><span>{{ c.name }}</span></a>
+  {% endfor %}
+</nav>
+{% else %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ url_for('shop.home') }}">Home</a>
+  {% if page.category %}<span aria-hidden="true">›</span><span aria-current="page">{{ page.category.name }}</span>{% endif %}
+  {% if q.q %}<span aria-hidden="true">›</span><span>Results for “{{ q.q }}”</span>{% endif %}
+</nav>
+{% endif %}
+
+<div id="catalog" class="catalog">
+  <aside class="card filters" aria-labelledby="filters-h">
+    <form method="get" action="{{ url_for('shop.home') }}" class="stack">
+      <div class="row-between">
+        <h2 id="filters-h" class="h-card">Filters</h2>
+        <a class="small" href="{{ url_for('shop.home') }}">Clear all</a>
+      </div>
+      {% if q.q %}<input type="hidden" name="q" value="{{ q.q }}">{% endif %}
+      {% if q.sort != 'relevance' %}<input type="hidden" name="sort" value="{{ q.sort }}">{% endif %}
+
+      <fieldset class="filters__group">
+        <legend class="eyebrow">Category</legend>
+        <label class="check"><input type="radio" name="cat" value="" {% if not q.category %}checked{% endif %}>All categories</label>
+        {% for top in top_categories %}
+          <label class="check check--strong"><input type="radio" name="cat" value="{{ top.slug }}" {% if q.category == top.slug %}checked{% endif %}>{{ top.name }}</label>
+          {% if q.category == top.slug or (page.category and page.category.parent_id == top.category_id) %}
+            <div class="filters__children">
+            {% for child in top.children %}
+              <label class="check"><input type="radio" name="cat" value="{{ child.slug }}" {% if q.category == child.slug %}checked{% endif %}>{{ child.name }}</label>
+            {% endfor %}
+            </div>
+          {% endif %}
+        {% endfor %}
+      </fieldset>
+
+      <fieldset class="filters__group">
+        <legend class="eyebrow">Price (MXN)</legend>
+        <div class="price-range">
+          <label class="field">Min<input class="input" type="number" name="min" min="0" step="50" inputmode="numeric" placeholder="0" value="{{ q.min_price|int if q.min_price is not none else '' }}"></label>
+          <label class="field">Max<input class="input" type="number" name="max" min="0" step="50" inputmode="numeric" placeholder="3000" value="{{ q.max_price|int if q.max_price is not none else '' }}"></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="filters__group">
+        <legend class="eyebrow">Customer rating</legend>
+        <label class="check"><input type="radio" name="rating" value="4" {% if q.min_rating == 4 %}checked{% endif %}>4 stars &amp; up</label>
+        <label class="check"><input type="radio" name="rating" value="3" {% if q.min_rating == 3 %}checked{% endif %}>3 stars &amp; up</label>
+        <label class="check"><input type="radio" name="rating" value="" {% if not q.min_rating %}checked{% endif %}>Any rating</label>
+      </fieldset>
+
+      <label class="check"><input type="checkbox" name="instock" value="1" {% if q.in_stock %}checked{% endif %}>In stock only</label>
+      <button type="submit" class="btn btn--dark btn--block">Apply filters</button>
+    </form>
+  </aside>
+
+  <section class="catalog__results" aria-labelledby="results-h">
+    <div class="toolbar">
+      <h2 id="results-h" class="toolbar__count">
+        {% if page.total %}Showing <strong>{{ "{:,}".format(page.first) }}–{{ "{:,}".format(page.last) }}</strong> of <strong>{{ "{:,}".format(page.total) }}</strong> products
+        {% else %}No products found{% endif %}
+      </h2>
+      <form method="get" action="{{ url_for('shop.home') }}" class="sort-form">
+        {% for key, value in q.url_args(sort=None, page=None).items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+        <label for="sort">Sort by</label>
+        <select id="sort" name="sort" class="select js-autosubmit">
+          {% for key, label in sorts.items() %}<option value="{{ key }}" {% if q.sort == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <noscript><button class="btn btn--sm btn--outline" type="submit">Sort</button></noscript>
+      </form>
+    </div>
+
+    {% if page.items %}
+      <div class="grid-cards">
+        {% for p in page.items %}{{ product_card(p, p.product_id in fav_ids, request.full_path) }}{% endfor %}
+      </div>
+      {% macro page_url(n) %}{{ url_for('shop.home', **q.url_args(page=n)) }}{% endmacro %}
+      {{ pagination(page.page, page.pages, page_url) }}
+    {% else %}
+      <div class="card empty-state">
+        <p class="empty-state__title">We could not find matching products</p>
+        <p class="muted">Try other words or remove some filters.</p>
+        <a class="btn btn--dark" href="{{ url_for('shop.home') }}">See all products</a>
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "layout_shop.html" %}
+{% import "icons.html" as ic %}
+{% from "partials/status.html" import status_badge %}
+{% block title %}Order {{ order.code }} confirmed{% endblock %}
+{% block content %}
+<section class="card confirm">
+  <span class="confirm__icon" aria-hidden="true">{{ ic.check(36) }}</span>
+  <div>
+    <h1 class="h-page">Thank you, your order is {{ 'confirmed' if order.status == 'Paid' else 'registered' }}</h1>
+    <p class="muted">
+      {% if order.status == 'Paid' %}We sent the receipt to {{ current_user.email }}.
+      {% else %}Pay with your reference within 48 hours. We will email you when the payment is confirmed.{% endif %}
+    </p>
+  </div>
+  <dl class="facts">
+    <div><dt>Order number</dt><dd class="strong">{{ order.code }}</dd></div>
+    <div><dt>Status</dt><dd>{{ status_badge(order.status) }}</dd></div>
+    <div><dt>Payment</dt><dd>{{ order.payment.label if order.payment }}</dd></div>
+    <div><dt>Total</dt><dd class="price">{{ order.total_amount|money }}</dd></div>
+    <div class="facts__wide"><dt>Shipping to</dt><dd>{{ order.shipping.one_line if order.shipping }}</dd></div>
+  </dl>
+  <div class="actions-row">
+    {% if order.invoice %}
+      <a class="btn btn--outline" href="{{ url_for('account.invoice', order_id=order.order_id) }}">{{ ic.download() }}View invoice</a>
+    {% endif %}
+    <a class="btn btn--primary" href="{{ url_for('account.order_detail', order_id=order.order_id) }}">Track my order</a>
+  </div>
+  <a href="{{ url_for('shop.home') }}">Continue shopping</a>
+</section>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Invoice {{ order.invoice.code }}{% endblock %}
+{% block body_class %}invoice-body{% endblock %}
+{% block layout %}
+<main id="main" class="invoice">
+  <div class="invoice__toolbar no-print">
+    <a href="{{ url_for('account.order_detail', order_id=order.order_id) if not current_user.is_admin else url_for('admin.order_detail', order_id=order.order_id) }}">← Back to the order</a>
+    <button type="button" class="btn btn--dark btn--sm js-print">Print / save as PDF</button>
+  </div>
+  <header class="invoice__head">
+    <div>
+      <p class="invoice__brand">{{ store_name }}</p>
+      <p class="muted small">Invoice for order {{ order.code }}</p>
+    </div>
+    <dl class="invoice__meta">
+      <div><dt>Invoice</dt><dd>{{ order.invoice.code }}</dd></div>
+      <div><dt>Issued</dt><dd>{{ order.invoice.issued_at|date }}</dd></div>
+      <div><dt>Customer</dt><dd>{{ order.buyer_name }}</dd></div>
+    </dl>
+  </header>
+  <p class="small"><strong>Ship to:</strong> {{ order.shipping.one_line if order.shipping }}</p>
+  <table class="table invoice__table">
+    <thead><tr><th scope="col">Description</th><th scope="col" class="num">Qty</th><th scope="col" class="num">Unit price</th><th scope="col" class="num">Amount</th></tr></thead>
+    <tbody>
+      {% for i in order.items %}
+        <tr><td>{{ i.name }} ({{ i.size }}, {{ i.color }})<br><span class="muted small mono">{{ i.product_id }}</span></td>
+            <td class="num">{{ i.quantity }}</td><td class="num">{{ i.unit_price|money }}</td><td class="num">{{ i.subtotal|money }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <dl class="totals">
+    <div><dt>Subtotal</dt><dd>{{ order.subtotal|money }}</dd></div>
+    <div><dt>IVA (16%)</dt><dd>{{ order.tax_amount|money }}</dd></div>
+    <div class="totals__grand"><dt>Total MXN</dt><dd>{{ order.total_amount|money }}</dd></div>
+  </dl>
+  <p class="muted small">Payment: {{ order.payment.label if order.payment }} · {{ order.payment.status if order.payment }}. This document is a purchase receipt for a school project, not a CFDI.</p>
+</main>
+{% endblock %}

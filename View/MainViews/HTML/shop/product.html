@@ -1,0 +1,157 @@
+{% extends "layout_shop.html" %}
+{% import "icons.html" as ic %}
+{% from "partials/garment.html" import garment %}
+{% from "partials/product_card.html" import product_card, fav_button, stars %}
+{% block title %}{{ p.name }}{% endblock %}
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="{{ url_for('shop.home') }}">Home</a><span aria-hidden="true">›</span>
+  <a href="{{ url_for('shop.home', cat=p.parent_category_slug) }}">{{ p.parent_category_name }}</a><span aria-hidden="true">›</span>
+  <a href="{{ url_for('shop.home', cat=p.category_slug) }}">{{ p.category_name }}</a><span aria-hidden="true">›</span>
+  <span aria-current="page">{{ p.name }}</span>
+</nav>
+
+<section class="card product-hero">
+  <div class="gallery">
+    {{ garment(p.kind, p.color_key, "xl") }}
+    <div class="gallery__thumbs" aria-hidden="true">
+      {% for name, key in p.swatches[:4] %}{{ garment(p.kind, key, "sm") }}{% endfor %}
+    </div>
+  </div>
+
+  <div class="pinfo">
+    <span class="eyebrow">{{ p.parent_category_name }} · {{ p.category_name }}</span>
+    <h1 class="pinfo__title">{{ p.name }}</h1>
+    <div class="pinfo__rating">
+      {{ stars(p.rating, p.review_count) }}
+      {% if p.review_count %}<a href="#reviews">Read reviews</a>{% endif %}
+    </div>
+    <p class="price price--xl">{{ p.price|money }} <span class="price__note">MXN · IVA included</span></p>
+    {% if p.stock > 10 %}<p class="stock stock--ok"><span class="stock__dot"></span>In stock</p>
+    {% elif p.stock > 0 %}<p class="stock stock--low"><span class="stock__dot"></span>Only {{ p.stock }} left</p>
+    {% else %}<p class="stock stock--out"><span class="stock__dot"></span>Sold out</p>{% endif %}
+    <p class="pinfo__desc">{{ p.description }}</p>
+
+    {% if p.in_stock %}
+    <form method="post" action="{{ url_for('cart.add') }}" class="stack" id="add-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="product_id" value="{{ p.product_id }}">
+      <input type="hidden" name="next" value="{{ request.path }}">
+
+      <fieldset class="option-group">
+        <legend>Color: <span class="js-color-label">{{ p.colors[0] }}</span></legend>
+        <div class="chips">
+          {% for name, key in p.swatches %}
+            <label class="chip chip--swatch">
+              <input type="radio" name="color" value="{{ name }}" {% if loop.first %}checked{% endif %} required data-label="{{ name }}">
+              <span><span class="dot sw-{{ key }}"></span>{{ name }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset class="option-group">
+        <legend>Size {% if p.sizes|length > 1 %}<span class="muted small">· MX sizes</span>{% endif %}</legend>
+        <div class="chips">
+          {% for s in p.sizes %}
+            <label class="chip"><input type="radio" name="size" value="{{ s }}" required {% if p.sizes|length == 1 %}checked{% endif %}><span>{{ s }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+
+      <div class="buy-row">
+        <div class="qty" data-max="{{ [p.stock, 10]|min }}">
+          <button type="button" class="qty__btn js-qty-dec" aria-label="Decrease quantity">{{ ic.minus() }}</button>
+          <label class="sr-only" for="qty">Quantity</label>
+          <input id="qty" class="qty__input" type="number" name="qty" value="1" min="1" max="{{ [p.stock, 10]|min }}" inputmode="numeric">
+          <button type="button" class="qty__btn js-qty-inc" aria-label="Increase quantity">{{ ic.plus() }}</button>
+        </div>
+        <button type="submit" class="btn btn--primary btn--lg buy-row__main">{{ ic.cart() }}Add to cart</button>
+        <button type="submit" name="go" value="cart" class="btn btn--outline btn--lg">Buy now</button>
+      </div>
+    </form>
+    {% endif %}
+    <div class="pinfo__fav">{{ fav_button(p, p.product_id in fav_ids, request.path, "inline-form") }}<span class="muted small">{{ 'Saved in your favorites' if p.product_id in fav_ids else 'Save for later' }}</span></div>
+
+    {% if data.seller %}
+    <div class="seller-box">
+      <span class="seller-box__logo" aria-hidden="true">{{ data.seller.store_name[:2]|upper }}</span>
+      <div class="seller-box__text">
+        <span class="muted small">Sold by</span>
+        <strong>{{ data.seller.store_name }}</strong>
+        <span class="muted small">{% if data.seller.rating %}★ {{ "%.1f"|format(data.seller.rating) }} seller rating · {% endif %}Verified seller</span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card" aria-labelledby="specs-h">
+  <div class="row-between">
+    <h2 id="specs-h" class="h-section">Specifications</h2>
+    <span class="muted small">Details depend on the category</span>
+  </div>
+  <dl class="specs">
+    {% for label, value in p.specs %}
+      <div class="specs__row"><dt>{{ label }}</dt><dd>{{ value }}</dd></div>
+    {% endfor %}
+    <div class="specs__row"><dt>Product ID</dt><dd class="mono">{{ p.product_id }}</dd></div>
+  </dl>
+</section>
+
+<section id="reviews" class="card reviews" aria-labelledby="reviews-h">
+  <div class="reviews__summary">
+    <h2 id="reviews-h" class="h-section">Customer reviews</h2>
+    {% if data.rating.count %}
+      <p class="reviews__avg"><span>{{ "%.1f"|format(data.rating.average) }}</span> out of 5 · {{ data.rating.count }} review{{ 's' if data.rating.count > 1 }}</p>
+      {% for stars_n, n, pct in data.rating.distribution %}
+        <div class="dist-row">
+          <span>{{ stars_n }} star{{ 's' if stars_n > 1 }}</span>
+          <span class="bar" role="img" aria-label="{{ pct }}% of reviews"><span class="bar__fill w-{{ (pct / 5)|round|int * 5 }}"></span></span>
+          <span class="muted">{{ pct }}%</span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="muted">No reviews yet.</p>
+    {% endif %}
+
+    {% if data.can_review %}
+    <form method="post" action="{{ url_for('shop.add_review', product_id=p.product_id) }}" class="review-form stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <h3 class="h-card">Write a review</h3>
+      <label class="field">Rating
+        <select class="select" name="rating" required>
+          <option value="5">5 – Excellent</option><option value="4">4 – Good</option><option value="3">3 – Average</option>
+          <option value="2">2 – Poor</option><option value="1">1 – Terrible</option>
+        </select>
+      </label>
+      <label class="field">Comment
+        <textarea class="textarea" name="comment" rows="3" maxlength="500" required placeholder="How was the fit, fabric and color?"></textarea>
+      </label>
+      <button type="submit" class="btn btn--dark">Publish review</button>
+    </form>
+    {% else %}
+      <p class="muted small">Only customers who bought this product can review it.</p>
+    {% endif %}
+  </div>
+  <div class="reviews__list">
+    {% for r in data.reviews %}
+      <article class="review">
+        <div class="row-between"><strong>{{ r.buyer_name }}</strong><span class="muted small">{{ r.created_at|date }}</span></div>
+        <span class="review__stars" aria-label="{{ r.rating }} out of 5 stars">{{ "★" * r.rating }}{{ "☆" * (5 - r.rating) }}</span>
+        <p>{{ r.comment }}</p>
+        <span class="verified">Verified purchase</span>
+      </article>
+    {% endfor %}
+  </div>
+</section>
+
+{% if data.related %}
+<section aria-labelledby="related-h" class="stack">
+  <h2 id="related-h" class="h-section">More {{ p.category_name|lower }}</h2>
+  <div class="grid-cards">
+    {% for r in data.related %}{{ product_card(r, r.product_id in fav_ids, request.path) }}{% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

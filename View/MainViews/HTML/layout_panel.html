@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body_class %}panel-body{% endblock %}
+{% block layout %}
+  <div class="panel-layout">
+    {% include "partials/sidenav.html" %}
+    <main id="main" class="panel-main">
+      {% include "partials/flash.html" %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+{% endblock %}

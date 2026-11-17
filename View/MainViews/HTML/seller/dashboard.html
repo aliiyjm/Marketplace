@@ -1,0 +1,71 @@
+{% extends "layout_panel.html" %}
+{% import "icons.html" as ic %}
+{% block title %}Seller dashboard{% endblock %}
+{% block content %}
+<div class="row-between wrap">
+  <div>
+    <h1 class="h-page">Hello, {{ d.store_name }}</h1>
+    <p class="muted">Your store at a glance · last 30 days</p>
+  </div>
+  <a class="btn btn--primary" href="{{ url_for('seller.new_product') }}">{{ ic.plus() }}Add product</a>
+</div>
+
+<div class="kpis">
+  {% for k in d.kpis %}
+    <div class="card kpi">
+      <span class="kpi__label">{{ k.label }}</span>
+      <span class="kpi__value {% if k.alert %}is-alert{% endif %}">{{ k.value }}</span>
+      <span class="muted small">{{ k.note }}</span>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="split">
+  <section class="card split__wide" aria-labelledby="chart-h">
+    <div class="row-between">
+      <h2 id="chart-h" class="h-card">Units sold per day</h2>
+      <span class="muted small">{{ d.period_label }}</span>
+    </div>
+    <div class="chart" role="img" aria-label="Units sold per day, {{ d.period_label }}: {% for x in d.daily %}{{ x.day }} {{ x.units }}{{ ', ' if not loop.last }}{% endfor %}">
+      {% for x in d.daily %}
+        <div class="chart__col">
+          <span class="chart__value">{{ x.units }}</span>
+          <span class="chart__bar h-{{ x.height }} {% if loop.last %}is-today{% endif %}"></span>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="chart__axis" aria-hidden="true"><span>{{ d.daily[0].day }}</span><span>{{ d.daily[7].day }}</span><span>{{ d.daily[-1].day }}</span></div>
+  </section>
+
+  <section id="alerts" class="card split__narrow" aria-labelledby="alerts-h">
+    <h2 id="alerts-h" class="h-card h-icon h-icon--danger">{{ ic.alert() }}Stock alerts</h2>
+    {% for a in d.alerts %}
+      <div class="alert-row">
+        <div class="alert-row__text">
+          <strong>{{ a.product_name }}</strong>
+          <span class="muted small">{{ a.current_stock }} left · alert below {{ a.threshold_limit }}</span>
+        </div>
+        <span class="status status--{{ 'cancelled' if a.alert_status == 'Open' else 'paid' }}">{{ a.alert_status }}</span>
+        <a class="small strong" href="{{ url_for('seller.edit_product', product_id=a.product_id) }}">Restock</a>
+      </div>
+    {% else %}
+      <p class="muted">All your products have enough stock.</p>
+    {% endfor %}
+  </section>
+</div>
+
+<section class="card card--flush table-wrap" aria-labelledby="top-h">
+  <h2 id="top-h" class="h-card card__title">Best-selling products</h2>
+  <table class="table">
+    <thead><tr><th scope="col">Product</th><th scope="col">Category</th><th scope="col" class="num">Units sold</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+    <tbody>
+      {% for t in d.top_products %}
+        <tr><td class="strong">{{ t.name }}</td><td class="muted">{{ t.category }}</td><td class="num">{{ t.units }}</td>
+            <td class="num"><a href="{{ url_for('seller.edit_product', product_id=t.product_id) }}">Edit</a></td></tr>
+      {% else %}
+        <tr><td colspan="4" class="empty">No sales in this period yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

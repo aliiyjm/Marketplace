@@ -1,0 +1,56 @@
+{% extends "layout_panel.html" %}
+{% import "icons.html" as ic %}
+{% from "partials/garment.html" import garment %}
+{% from "partials/pagination.html" import pagination %}
+{% block title %}My products{% endblock %}
+{% block content %}
+<div class="row-between wrap">
+  <h1 class="h-page">My products <span class="muted h-sub">({{ "{:,}".format(page.total) }})</span></h1>
+  <a class="btn btn--primary" href="{{ url_for('seller.new_product') }}">{{ ic.plus() }}Add product</a>
+</div>
+
+<form class="filter-bar" method="get" action="{{ url_for('seller.products') }}" role="search">
+  <label class="sr-only" for="pq">Search by name or ID</label>
+  <input id="pq" class="input" type="search" name="q" maxlength="80" value="{{ q }}" placeholder="Search by name or product ID">
+  <label class="sr-only" for="ps">Filter by status</label>
+  <select id="ps" class="select" name="status">
+    <option value="">Any status</option>
+    <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+    <option value="draft" {% if status == 'draft' %}selected{% endif %}>Draft</option>
+    <option value="out" {% if status == 'out' %}selected{% endif %}>Out of stock</option>
+  </select>
+  <button class="btn btn--dark" type="submit">{{ ic.search(18) }}Search</button>
+</form>
+
+<div class="card card--flush table-wrap">
+  <table class="table">
+    <thead><tr><th scope="col">Product</th><th scope="col">ID</th><th scope="col">Category</th><th scope="col" class="num">Price</th><th scope="col" class="num">Stock</th><th scope="col">Status</th><th scope="col" class="num">Actions</th></tr></thead>
+    <tbody>
+    {% for p in page.items %}
+      <tr>
+        <td><span class="cell-product">{{ garment(p.kind, p.color_key, "xs") }}<span class="strong">{{ p.name }}</span></span></td>
+        <td class="mono muted">{{ p.product_id }}</td>
+        <td class="muted">{{ p.parent_category_name }} › {{ p.category_name }}</td>
+        <td class="num">{{ p.price|money }}</td>
+        <td class="num strong {% if p.stock < p.threshold_limit or p.stock == 0 %}text-danger{% endif %}">{{ p.stock }}</td>
+        <td>
+          {% if p.status == 'draft' %}<span class="status status--delivered">Draft</span>
+          {% elif p.stock == 0 %}<span class="status status--cancelled">Out of stock</span>
+          {% else %}<span class="status status--paid">Active</span>{% endif %}
+        </td>
+        <td class="num">
+          <span class="actions">
+            <a class="btn btn--icon btn--yellow" href="{{ url_for('seller.edit_product', product_id=p.product_id) }}" aria-label="Edit {{ p.name }}">{{ ic.edit() }}</a>
+            <a class="btn btn--icon btn--danger" href="{{ url_for('seller.delete_product', product_id=p.product_id) }}" aria-label="Delete {{ p.name }}">{{ ic.trash() }}</a>
+          </span>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">{% if q or status %}No products match.{% else %}You have no products yet.{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% macro page_url(n) %}{{ url_for('seller.products', q=q or None, status=status or None, page=n if n > 1 else None) }}{% endmacro %}
+{{ pagination(page.page, page.pages, page_url) }}
+{% endblock %}

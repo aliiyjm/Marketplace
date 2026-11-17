@@ -1,0 +1,10 @@
+{% extends "layout_shop.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<section class="card empty-state error-page">
+  <p class="error-page__code">{{ code }}</p>
+  <h1 class="h-page">{{ title }}</h1>
+  <p class="muted">{{ text }}</p>
+  <a class="btn btn--dark" href="{{ url_for('shop.home') }}">Go to the store</a>
+</section>
+{% endblock %}

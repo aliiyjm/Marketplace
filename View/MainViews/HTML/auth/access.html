@@ -1,0 +1,74 @@
+{% extends "layout_shop.html" %}
+{% import "icons.html" as ic %}
+{% block title %}Sign in or create an account{% endblock %}
+{% block content %}
+<div class="auth-grid">
+  <section class="card auth-card" aria-labelledby="signin-h">
+    <div>
+      <h1 id="signin-h" class="h-page">Sign in</h1>
+      <p class="muted">Welcome back. Use the email you registered with.</p>
+    </div>
+    {% for e in signin_errors %}<p class="alert alert--error" role="alert">{{ e }}</p>{% endfor %}
+    <form method="post" action="{{ url_for('auth.signin') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label class="field">Email
+        <input class="input {% if signin_errors %}is-invalid{% endif %}" type="email" name="email" autocomplete="email" required maxlength="120" value="{{ form.get('email', '') if signin_errors else '' }}">
+      </label>
+      <label class="field">Password
+        <input class="input {% if signin_errors %}is-invalid{% endif %}" type="password" name="password" autocomplete="current-password" required maxlength="128">
+      </label>
+      <label class="check"><input type="checkbox" name="remember" value="1">Keep me signed in</label>
+      <button type="submit" class="btn btn--dark btn--block btn--lg">Sign in</button>
+    </form>
+    <p class="note">{{ ic.lock() }}After 5 failed attempts the account is locked for 15 minutes.</p>
+  </section>
+
+  <section id="register" class="card auth-card" aria-labelledby="signup-h">
+    <div>
+      <h2 id="signup-h" class="h-page">Create an account</h2>
+      <p class="muted">Shop from independent stores, or open your own.</p>
+    </div>
+    {% for e in register_errors %}<p class="alert alert--error" role="alert">{{ e }}</p>{% endfor %}
+    <form method="post" action="{{ url_for('auth.register') }}" class="stack js-register">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <fieldset class="option-group">
+        <legend>I want to</legend>
+        <div class="role-picker">
+          <label class="chip chip--big"><input type="radio" name="role" value="buyer" {% if form.get('role') != 'seller' %}checked{% endif %}><span>Buy</span></label>
+          <label class="chip chip--big"><input type="radio" name="role" value="seller" {% if form.get('role') == 'seller' %}checked{% endif %}><span>Buy and sell</span></label>
+        </div>
+      </fieldset>
+      <label class="field">Full name
+        <input class="input" type="text" name="name" autocomplete="name" required maxlength="80" value="{{ form.get('name', '') }}">
+      </label>
+      <label class="field">Email
+        <input class="input" type="email" name="email" autocomplete="email" required maxlength="120" value="{{ form.get('email', '') if register_errors else '' }}">
+      </label>
+      <div class="seller-fields stack" data-radio="role" data-show-when="seller">
+        <label class="field">Store name
+          <input class="input" type="text" name="store_name" maxlength="60" value="{{ form.get('store_name', '') }}">
+        </label>
+        <label class="field">RFC
+          <input class="input mono" type="text" name="tax_id" maxlength="13" autocapitalize="characters" value="{{ form.get('tax_id', '') }}" placeholder="ABC123456XY9">
+          <span class="hint">Needed to issue invoices for your sales.</span>
+        </label>
+      </div>
+      <div class="grid-2">
+        <label class="field">Password
+          <input class="input" type="password" name="password" autocomplete="new-password" required minlength="8" maxlength="128">
+        </label>
+        <label class="field">Confirm password
+          <input class="input" type="password" name="confirm" autocomplete="new-password" required minlength="8" maxlength="128">
+        </label>
+      </div>
+      <ul class="pw-rules">
+        <li>At least 8 characters</li><li>One uppercase letter</li><li>One number</li><li>Both passwords match</li>
+      </ul>
+      <label class="check check--top"><input type="checkbox" name="terms" value="1" required><span>I accept the Terms and the Privacy notice.</span></label>
+      <button type="submit" class="btn btn--primary btn--block btn--lg">Create account</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

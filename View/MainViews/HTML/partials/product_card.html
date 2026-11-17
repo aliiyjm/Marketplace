@@ -1,0 +1,42 @@
+{% import "icons.html" as ic %}
+{% from "partials/garment.html" import garment %}
+{% macro stars(rating, count) -%}
+  {% if count %}
+    <span class="rating">{{ ic.star() }}<strong>{{ "%.1f"|format(rating) }}</strong><span class="muted">({{ count }})</span></span>
+  {% else %}
+    <span class="rating muted">No reviews yet</span>
+  {% endif %}
+{%- endmacro %}
+
+{% macro fav_button(p, is_fav, next_url, cls="pcard__fav") -%}
+<form method="post" action="{{ url_for('account.toggle_favorite') }}" class="{{ cls }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="product_id" value="{{ p.product_id }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <button type="submit" class="fav-btn {% if is_fav %}is-on{% endif %}"
+          aria-pressed="{{ 'true' if is_fav else 'false' }}"
+          aria-label="{{ 'Remove ' ~ p.name ~ ' from favorites' if is_fav else 'Save ' ~ p.name ~ ' to favorites' }}">{{ ic.heart(20) }}</button>
+</form>
+{%- endmacro %}
+
+{% macro product_card(p, is_fav=False, next_url="/") -%}
+<article class="pcard">
+  <div class="pcard__media">
+    <a href="{{ url_for('shop.product', product_id=p.product_id) }}" tabindex="-1" aria-hidden="true">{{ garment(p.kind, p.color_key) }}</a>
+    {{ fav_button(p, is_fav, next_url) }}
+    {% if not p.in_stock %}<span class="pcard__flag">Sold out</span>{% endif %}
+  </div>
+  <div class="pcard__body">
+    <span class="eyebrow">{{ p.parent_category_name }} · {{ p.category_name }}</span>
+    <a class="pcard__name" href="{{ url_for('shop.product', product_id=p.product_id) }}">{{ p.name }}</a>
+    <span class="pcard__colors">
+      {% for name, key in p.swatches[:4] %}<span class="dot dot--sm sw-{{ key }}" title="{{ name }}"></span>{% endfor %}
+      <span class="muted">{{ p.colors|length }} color{{ 's' if p.colors|length > 1 }} · {{ p.sizes|length }} size{{ 's' if p.sizes|length > 1 }}</span>
+    </span>
+    {{ stars(p.rating, p.review_count) }}
+    <span class="price">{{ p.price|money }}</span>
+    <span class="pcard__seller">Sold by {{ p.store_name }}</span>
+    <a class="btn btn--primary btn--block pcard__cta" href="{{ url_for('shop.product', product_id=p.product_id) }}">{{ 'Choose size' if p.in_stock else 'View product' }}</a>
+  </div>
+</article>
+{%- endmacro %}

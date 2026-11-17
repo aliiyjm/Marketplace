@@ -1,0 +1,37 @@
+{% import "icons.html" as ic %}
+{% set ep = request.endpoint or "" %}
+{% macro link(endpoint, label, icon, active, extra="") -%}
+<a class="sidenav__link {% if active %}is-active{% endif %}" href="{{ url_for(endpoint) }}{{ extra }}" {% if active %}aria-current="page"{% endif %}>{{ icon }}<span>{{ label }}</span></a>
+{%- endmacro %}
+<aside class="sidenav">
+  <a class="sidenav__brand" href="{{ url_for('shop.home') }}">
+    <span class="brand__mark brand__mark--yellow" aria-hidden="true">M</span>
+    <span><span class="sidenav__name">{{ store_name }}</span><span class="sidenav__area">{{ 'Administration' if ep.startswith('admin.') else 'Seller center' }}</span></span>
+  </a>
+  {% if ep.startswith('admin.') %}
+    <nav class="sidenav__nav" aria-label="Administration">
+      {{ link('admin.users', 'Users', ic.users(), ep.startswith('admin.') and 'user' in ep) }}
+      {{ link('admin.categories', 'Categories', ic.tag(), 'categor' in ep) }}
+      {{ link('admin.orders', 'All orders', ic.box(), 'order' in ep) }}
+    </nav>
+  {% else %}
+    <nav class="sidenav__nav" aria-label="Seller center">
+      {{ link('seller.dashboard', 'Dashboard', ic.grid(), ep == 'seller.dashboard') }}
+      {{ link('seller.products', 'My products', ic.tag(), ep in ('seller.products', 'seller.edit_product', 'seller.delete_product')) }}
+      {{ link('seller.new_product', 'Add product', ic.plus(20), ep == 'seller.new_product') }}
+      {{ link('seller.dashboard', 'Stock alerts', ic.alert(), False, '#alerts') }}
+    </nav>
+  {% endif %}
+  <div class="sidenav__foot">
+    {% if current_user and current_user.is_admin and not ep.startswith('admin.') %}
+      <a class="sidenav__link" href="{{ url_for('admin.users') }}">{{ ic.users() }}<span>Administration</span></a>
+    {% elif current_user and current_user.is_seller and ep.startswith('admin.') %}
+      <a class="sidenav__link" href="{{ url_for('seller.dashboard') }}">{{ ic.store() }}<span>Seller center</span></a>
+    {% endif %}
+    <a class="sidenav__link" href="{{ url_for('shop.home') }}">{{ ic.chevron_left() }}<span>Back to the store</span></a>
+    <form method="post" action="{{ url_for('auth.signout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="sidenav__link sidenav__link--button">{{ ic.logout() }}<span>Sign out</span></button>
+    </form>
+  </div>
+</aside>

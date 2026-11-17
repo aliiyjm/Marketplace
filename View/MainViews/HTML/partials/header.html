@@ -1,0 +1,60 @@
+{% import "icons.html" as ic %}
+{% set ep = request.endpoint or "" %}
+<header class="site-header">
+  <div class="container site-header__bar">
+    <a class="brand" href="{{ url_for('shop.home') }}">
+      <span class="brand__mark" aria-hidden="true">M</span>
+      <span class="brand__name">{{ store_name }}</span>
+    </a>
+
+    <form class="search" role="search" method="get" action="{{ url_for('shop.home') }}">
+      <label class="sr-only" for="search-cat">Search in category</label>
+      <select id="search-cat" name="cat">
+        <option value="">All</option>
+        {% for c in top_categories %}
+          <option value="{{ c.slug }}" {% if request.args.get('cat') == c.slug %}selected{% endif %}>{{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <label class="sr-only" for="search-q">Search products</label>
+      <input id="search-q" type="search" name="q" maxlength="80" value="{{ request.args.get('q', '') if ep == 'shop.home' else '' }}"
+             placeholder="Search dresses, jeans, sneakers…">
+      <button type="submit" aria-label="Search">{{ ic.search() }}</button>
+    </form>
+
+    <nav class="nav-account" aria-label="Account">
+      <a class="nav-link {% if ep == 'account.favorites' %}is-active{% endif %}" href="{{ url_for('account.favorites') }}">{{ ic.heart() }}<span>Favorites</span></a>
+      <a class="nav-link {% if ep.startswith('account.order') %}is-active{% endif %}" href="{{ url_for('account.orders') }}">{{ ic.box() }}<span>Orders</span></a>
+      <a class="nav-link {% if ep.startswith('cart.') %}is-active{% endif %}" href="{{ url_for('cart.view') }}" aria-label="Cart, {{ cart_count }} items">
+        <span class="nav-link__cart">{{ ic.cart(22) }}{% if cart_count %}<span class="count-badge" aria-hidden="true">{{ cart_count }}</span>{% endif %}</span><span>Cart</span>
+      </a>
+      {% if current_user %}
+        <span class="nav-user">
+          <span class="avatar" aria-hidden="true">{{ current_user.initial }}</span>
+          <span class="nav-user__name">{{ current_user.first_name }}</span>
+        </span>
+        <form method="post" action="{{ url_for('auth.signout') }}" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="nav-link nav-link--button" aria-label="Sign out">{{ ic.logout() }}</button>
+        </form>
+      {% else %}
+        <a class="btn btn--dark btn--sm" href="{{ url_for('auth.access', next=request.path) }}">{{ ic.user() }}Sign in</a>
+      {% endif %}
+    </nav>
+  </div>
+  <div class="catbar">
+    <nav class="container catbar__inner" aria-label="Categories">
+      <a href="{{ url_for('shop.home') }}">All</a>
+      {% for c in top_categories %}
+        <a href="{{ url_for('shop.home', cat=c.slug) }}" {% if request.args.get('cat') == c.slug %}aria-current="page"{% endif %}>{{ c.name }}</a>
+      {% endfor %}
+      {% if current_user and current_user.is_admin %}
+        <a class="catbar__special" href="{{ url_for('admin.users') }}">Admin</a>
+      {% endif %}
+      {% if current_user and current_user.is_seller %}
+        <a class="catbar__special" href="{{ url_for('seller.dashboard') }}">Seller center</a>
+      {% elif not current_user or not current_user.is_admin %}
+        <a class="catbar__special" href="{{ url_for('auth.access') }}#register">Sell on {{ store_name }}</a>
+      {% endif %}
+    </nav>
+  </div>
+</header>

@@ -1,0 +1,49 @@
+{% extends "layout_panel.html" %}
+{% import "icons.html" as ic %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<h1 class="h-page">User management</h1>
+
+<div class="row-between wrap">
+  <form class="filter-bar" method="get" action="{{ url_for('admin.users') }}" role="search">
+    <label class="sr-only" for="uq">Search by ID, name or email</label>
+    <input id="uq" class="input" type="search" name="q" maxlength="80" value="{{ q }}" placeholder="Search by ID, name or email…">
+    <label class="sr-only" for="ur">Filter by role</label>
+    <select id="ur" class="select" name="role">
+      <option value="">All roles</option>
+      {% for r in roles %}<option value="{{ r }}" {% if role == r %}selected{% endif %}>{{ r|capitalize }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn btn--dark btn--icon" aria-label="Search">{{ ic.search() }}</button>
+    {% if q or role %}<a class="small" href="{{ url_for('admin.users') }}">Clear</a>{% endif %}
+  </form>
+  <a class="btn btn--primary" href="{{ url_for('admin.new_user') }}">{{ ic.plus() }}Add user</a>
+</div>
+
+<div class="card card--flush table-wrap">
+  <table class="table">
+    <thead><tr><th scope="col">ID</th><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Created</th><th scope="col" class="num">Actions</th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td class="mono muted">{{ u.id_user }}</td>
+        <td class="strong">{{ u.name }}</td>
+        <td>{{ u.email }}</td>
+        <td><span class="role role--{{ u.role }}">{{ u.role|capitalize }}</span></td>
+        <td class="muted">{{ u.created_at|date if u.created_at else '—' }}</td>
+        <td class="num">
+          <span class="actions">
+            <a class="btn btn--icon btn--yellow" href="{{ url_for('admin.edit_user', user_id=u.id_user) }}" aria-label="Edit {{ u.name }}">{{ ic.edit() }}</a>
+            {% if u.id_user != current_user.id_user %}
+            <a class="btn btn--icon btn--danger" href="{{ url_for('admin.delete_user', user_id=u.id_user) }}" aria-label="Delete {{ u.name }}">{{ ic.trash() }}</a>
+            {% endif %}
+          </span>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">{% if q or role %}No users match “{{ q }}”.{% else %}No users registered yet.{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p class="muted small">{{ users|length }} user{{ 's' if users|length != 1 }}.</p>
+{% endblock %}

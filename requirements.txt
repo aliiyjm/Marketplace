@@ -1,0 +1,4 @@
+Flask>=3.0,<4
+requests>=2.32,<3
+# development / automated tests
+pytest>=8

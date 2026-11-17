@@ -1,0 +1,62 @@
+{% extends "layout_shop.html" %}
+{% import "icons.html" as ic %}
+{% from "partials/garment.html" import garment %}
+{% block title %}Your cart{% endblock %}
+{% block content %}
+<h1 class="h-page">Your cart <span class="muted h-sub">({{ cart.count }} item{{ 's' if cart.count != 1 }})</span></h1>
+
+{% if cart.empty %}
+  <div class="card empty-state">
+    <p class="empty-state__title">Your cart is empty</p>
+    <p class="muted">Find something you love in the catalog.</p>
+    <a class="btn btn--dark" href="{{ url_for('shop.home') }}">Continue shopping</a>
+  </div>
+{% else %}
+<div class="two-col">
+  <section class="card two-col__main cart-lines" aria-label="Cart items">
+    {% for line in cart.lines %}
+    {% set p = line.product %}
+    <article class="cart-line">
+      <a href="{{ url_for('shop.product', product_id=p.product_id) }}" class="cart-line__media" tabindex="-1" aria-hidden="true">{{ garment(p.kind, p.color_key, "sm") }}</a>
+      <div class="cart-line__info">
+        <a class="cart-line__name" href="{{ url_for('shop.product', product_id=p.product_id) }}">{{ p.name }}</a>
+        <span class="muted small">Size {{ line.size }} · {{ line.color }}</span>
+        <span class="muted small">Sold by {{ p.store_name }}</span>
+        <span class="small">{{ line.unit_price|money }} each</span>
+      </div>
+      <div class="qty qty--forms" role="group" aria-label="Quantity of {{ p.name }}">
+        <form method="post" action="{{ url_for('cart.update', line_id=line.line_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" name="qty" value="{{ line.qty - 1 }}" class="qty__btn" aria-label="Decrease">{{ ic.minus() }}</button>
+        </form>
+        <output class="qty__value">{{ line.qty }}</output>
+        <form method="post" action="{{ url_for('cart.update', line_id=line.line_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" name="qty" value="{{ line.qty + 1 }}" class="qty__btn" aria-label="Increase" {% if line.qty >= line.max_qty %}disabled{% endif %}>{{ ic.plus() }}</button>
+        </form>
+      </div>
+      <strong class="cart-line__total">{{ line.line_total|money }}</strong>
+      <form method="post" action="{{ url_for('cart.remove', line_id=line.line_id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn--icon btn--ghost-danger" aria-label="Remove {{ p.name }}">{{ ic.trash() }}</button>
+      </form>
+    </article>
+    {% endfor %}
+    <a class="back-link" href="{{ url_for('shop.home') }}">← Continue shopping</a>
+  </section>
+
+  {% set subtotal, tax, total = cart.totals %}
+  <aside class="card two-col__side summary" aria-labelledby="summary-h">
+    <h2 id="summary-h" class="h-card">Order summary</h2>
+    <dl class="summary__list">
+      <div><dt>Subtotal</dt><dd>{{ subtotal|money }}</dd></div>
+      <div><dt>IVA (16%)</dt><dd>{{ tax|money }}</dd></div>
+      <div><dt>Shipping</dt><dd class="text-ok">Free</dd></div>
+      <div class="summary__total"><dt>Total</dt><dd>{{ total|money }}</dd></div>
+    </dl>
+    <a class="btn btn--primary btn--block btn--lg" href="{{ url_for('cart.checkout') }}">Proceed to checkout</a>
+    <p class="muted small">Stock is reserved when you place the order, not while items are in the cart.</p>
+  </aside>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,12 @@
+<footer class="site-footer">
+  <div class="container site-footer__inner">
+    <span class="site-footer__brand">{{ store_name }}</span>
+    <nav aria-label="Footer">
+      <a href="{{ url_for('shop.home', cat='women') }}">Women</a>
+      <a href="{{ url_for('shop.home', cat='men') }}">Men</a>
+      <a href="{{ url_for('shop.home', cat='kids') }}">Kids</a>
+      <a href="{{ url_for('auth.access') }}#register">Sell with us</a>
+    </nav>
+    <span>© 2026 {{ store_name }} · Prices in MXN, IVA included</span>
+  </div>
+</footer>
