@@ -11,8 +11,25 @@ Interfaces/      DTOs (validated, whitelisted fields) + abstract contracts
 Implementation/  business rules; DataSource/ holds the in-memory tables of the
                  database diagram, the 17,000-product seed and demo orders
 View/MainViews/  PY (Flask routes + security), HTML (Jinja templates), CSS, JS, Utils
-tests/           automated tests (pytest)
+tests/           automated tests (pytest), including a fake DynamoDB table
+scripts/         build_single_file_lambda.py (generates lambda_deploy/lambda_function.py),
+                 load_to_dynamo.py (demo users + 17,000 products), load_to_sql.py (PostgreSQL demo data),
+                 check_databases.py (verifies connections, tables and columns)
+lambda_deploy/   lambda_function.py: the whole Lambda (users + products) in one file, to paste in AWS
+docs/            BASES_DE_DATOS.md: connect MySQL + PostgreSQL (.env, load, verify)
+                 DYNAMODB_LAMBDA.md: step-by-step AWS setup (single table MarketplaceDB)
 ```
+
+The Lambda reuses the same layers: `Services/LambdaRouter` → `Services/ProductService` and
+`Services/UserService/UserLambdaService` (routes) → `Interfaces/ProductServiceInterface` and
+`Interfaces/UserServiceInterface/UserItem` (validation) → `Implementation/ProductServiceImplementation`
+and `Implementation/UserServiceImplementation/UserDynamoImplementation` (boto3 + DynamoDB).
+Everything is stored in the single table MarketplaceDB. Setup: [docs/DYNAMODB_LAMBDA.md](docs/DYNAMODB_LAMBDA.md).
+
+Data access goes through repositories (`Interfaces/DataInterfaces`): every one has a memory
+version (demo, tests) and a real one — `MySQLFinanceRepository` (orders), `PostgresOperationsRepository`
+(categories, sellers, reviews, analytics, alerts), `ApiQuickRepository` (carts, favorites) and
+`ApiProductRepository` (products). Setup: [docs/BASES_DE_DATOS.md](docs/BASES_DE_DATOS.md).
 
 ## Run it
 
@@ -39,12 +56,17 @@ Demo accounts (password `Demo1234`):
 python -m pytest -q
 ```
 
-## Configuration (environment variables)
+## Configuration (environment variables or a `.env` file — copy `.env.example`)
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DATA_BACKEND` | `memory` | `aws` sends the users CRUD to the API Gateway/Lambda/DynamoDB in `View/MainViews/Utils/api_client.py`. Everything else runs on the local data source until its Lambdas exist. |
-| `API_URL` | see api_client.py | API Gateway invoke URL (only with `DATA_BACKEND=aws`). |
+| `FINANCE_BACKEND` | `memory` | `mysql`: orders, payments, shipping, invoices and history in MySQL `finance_db` (`MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`). |
+| `OPERATIONS_BACKEND` | `memory` | `postgres`: categories, sellers, reviews, analytics and alerts in PostgreSQL (`PG_HOST`, `PG_PORT`, `PG_USER`, `PG_PASSWORD`, `PG_DATABASE`). |
+| `DATA_BACKEND` | `memory` | `aws`: users, carts and favorites live in DynamoDB MarketplaceDB through the Lambda. |
+| `PRODUCTS_BACKEND` | `memory` | `aws`: the catalog is read from and written to DynamoDB MarketplaceDB through the Lambda. |
+| `API_URL` | see api_client.py | API Gateway invoke URL (users). |
+| `PRODUCTS_API_URL` | `API_URL` | API Gateway invoke URL for `/productos/...`. |
+| `MARKETPLACE_API_KEY` | — | Same value as the Lambda's `MARKETPLACE_API_KEY` (users routes and product writes). Never commit it. |
 | `PRODUCT_COUNT` | `17000` | Size of the generated catalog. |
 | `SECRET_KEY` | random | Set it so sessions survive restarts. |
 | `SESSION_COOKIE_SECURE` | off | Set `1` when served over HTTPS. |
@@ -54,12 +76,9 @@ python -m pytest -q
 
 | Diagram | Code |
 | --- | --- |
-| DynamoDB MarketplaceDB (users, products with dynamic JSON) | `store.users`, `store.products` (+ carts, favorites) |
-| MYSQL_ORDERS / ORDER_ITEMS / STATUS_HISTORY / PAYMENTS / SHIPPING / INVOICES | `PayServiceImplementation` |
-| POSTGRES_CATEGORIES / SELLERS / REVIEWS / ANALYTICS / ALERTS | `MainServiceImplementation`, `SellerServiceImplementation`, `AdminServiceImplementation` |
-
-Suggested change for clothing: add `size` and `color` columns to `MYSQL_ORDER_ITEMS`
-(the code already stores the chosen variant).
+| DynamoDB MarketplaceDB (users, products, carts, favorites) | `USER#`, `PRODUCT#`, `CART#`, `FAV#` items through the Lambda (`DATA_BACKEND=aws`, `PRODUCTS_BACKEND=aws`) |
+| MySQL finance_db: orders, order_items, payments, shipping_addresses, invoices, order_status_history | `MySQLFinanceRepository` (`FINANCE_BACKEND=mysql`) |
+| PostgreSQL: categories, sellers, reviews, analytics, alerts | `PostgresOperationsRepository` (`OPERATIONS_BACKEND=postgres`) |
 
 ## Security measures
 
@@ -71,3 +90,5 @@ Suggested change for clothing: add `size` and `color` columns to `MYSQL_ORDER_IT
 - Prices and totals recalculated on the server; checkout validates stock and writes all tables at once.
 - Card numbers are validated (Luhn, expiry, CVV) and discarded; only the last 4 digits are kept.
 - DTOs whitelist fields and limit lengths; Jinja autoescaping on every template.
+- SQL: parameterized queries only (no SQL injection), one transaction per order / status change, optimistic check on status changes, friendly 503 page when a database is down, credentials only in `.env` (git-ignored).
+- Lambda: users, carts, favorites and product writes require `x-api-key` (constant-time compare, refused if not configured); users are whitelisted and only accept password hashes; public product reads only see active products; every payload re-validated in the Lambda; stock changes are conditional updates (never below zero) and checkout undoes partial stock changes; errors never expose internals; IAM policy limited to one table and index.
