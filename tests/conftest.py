@@ -1,5 +1,10 @@
 """Shared fixtures. Each test gets its own fresh data (1,200 products) so tests
-never depend on each other."""
+never depend on each other.
+
+The tests NEVER use your real databases: the project's .env is ignored and the
+settings below are removed, so every test runs with in-memory data and fakes,
+whatever your .env or terminal says."""
+import os
 import re
 import sys
 from pathlib import Path
@@ -8,6 +13,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+os.environ["MARKETPLACE_ENV_FILE"] = "none"          # do not read the real .env
+for _name in list(os.environ):
+    if _name.endswith("_BACKEND") or _name.startswith(("MYSQL_", "PG_")) or _name in (
+            "API_URL", "PRODUCTS_API_URL", "MARKETPLACE_API_KEY", "PRODUCT_COUNT", "SECRET_KEY"):
+        del os.environ[_name]
 
 from Services.ServiceContainer import build_services  # noqa: E402
 from View.MainViews.PY.app import create_app  # noqa: E402

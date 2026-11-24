@@ -23,6 +23,27 @@ from Interfaces.Validators import ValidationError
 log = logging.getLogger("sql")
 
 
+# Common driver messages -> what to check (shown only in the console).
+_HINTS = (
+    (("access denied", "password authentication failed", "authentication"),
+     "check the user and password in .env ({prefix}_USER / {prefix}_PASSWORD)"),
+    (("unknown database", "does not exist"),
+     "the database or table does not exist: check {prefix}_DATABASE in .env and run the script in database/"),
+    (("connection refused", "can't connect", "could not connect", "timeout", "timed out", "no route"),
+     "the server is not running or the host/port is wrong ({prefix}_HOST / {prefix}_PORT); start the service"),
+)
+
+
+def explain(error, dialect):
+    """Driver error -> one line with the cause and what to check."""
+    text = str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__
+    prefix = "PG" if dialect == "postgres" else "MYSQL"
+    for words, hint in _HINTS:
+        if any(w in text.lower() for w in words):
+            return f"{text}  ->  {hint.format(prefix=prefix)}"
+    return text
+
+
 def _is_integrity_error(error):
     return any(cls.__name__ in ("IntegrityError", "UniqueViolation") for cls in type(error).__mro__)
 
@@ -78,7 +99,8 @@ class SqlDatabase:
             conn = self._connect()
         except Exception as e:
             log.error("Cannot connect to %s: %r", self.label, e)
-            raise DatabaseUnavailable(f"Could not connect to the database ({self.label}). Try again later.") from None
+            raise DatabaseUnavailable(f"Could not connect to the database ({self.label}). Try again later.",
+                                      detail=explain(e, self.dialect)) from None
         try:
             cursor = Cursor(conn.cursor(), self.dialect)
             yield cursor
@@ -92,7 +114,8 @@ class SqlDatabase:
                 log.warning("Integrity error on %s: %r", self.label, e)
                 raise DuplicateKey("That record already exists.") from None
             log.exception("Error on %s", self.label)
-            raise DatabaseUnavailable(f"The database ({self.label}) could not complete the operation.") from None
+            raise DatabaseUnavailable(f"The database ({self.label}) could not complete the operation.",
+                                      detail=explain(e, self.dialect)) from None
         finally:
             conn.close()
 

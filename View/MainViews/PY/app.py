@@ -6,6 +6,7 @@ Then open http://127.0.0.1:5000
 Layers: View (this folder) -> Services -> Interfaces -> Implementation.
 The View never touches data directly; it only calls Services.
 """
+import logging
 import os
 import secrets
 import sys
@@ -116,8 +117,27 @@ def create_app(container=None, config=None):
     return app
 
 
+def _start_or_explain():
+    """Build the app; if a database or setting is wrong, print ONE clear line
+    (what failed and what to check) instead of a long traceback."""
+    from Interfaces.Validators import ValidationError
+    from View.MainViews.Utils.env_file import utf8_console
+
+    utf8_console()
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    logging.getLogger("sql").setLevel(logging.CRITICAL)   # its cause is printed below, once
+    try:
+        return create_app()
+    except DatabaseUnavailable as e:
+        print(f"\n✗ {e}\n  Cause: {e.detail or 'see the messages above'}")
+    except (RuntimeError, ValidationError) as e:
+        print(f"\n✗ {e}")
+    print("  Check your .env and run:  python scripts/check_databases.py")
+    sys.exit(1)
+
+
 if __name__ == "__main__":
-    application = create_app()
+    application = _start_or_explain()
     backends = ", ".join(f"{k.split('_')[0].lower()}={os.environ.get(k, 'memory')}" for k in
                          ("DATA_BACKEND", "PRODUCTS_BACKEND", "FINANCE_BACKEND", "OPERATIONS_BACKEND"))
     print(f"{STORE_NAME} running on http://127.0.0.1:5000  ({backends})")

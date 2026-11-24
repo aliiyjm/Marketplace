@@ -68,7 +68,11 @@ class ApiProductRepository(ProductRepositoryInterface):
         return ProductStoreError(message if getattr(error, "status", None) == 400 else default)
 
     def load_all(self):
-        for payload in self.client.list_all():
+        try:
+            payloads = list(self.client.list_all())
+        except self.client.Error as e:   # wrong API_URL / key, Lambda down: a clear message at startup
+            raise self._translate(e, f"Could not read the products from DynamoDB: {e}") from None
+        for payload in payloads:
             try:
                 yield ProductItem.from_payload(payload).to_record()
             except ValidationError as e:     # never let one bad item stop the whole catalog

@@ -9,7 +9,8 @@ Con esto la app deja de usar datos de ejemplo en memoria: todo se lee y se guard
 | **PostgreSQL** | categorías y vendedores | los lee al arrancar y **cada minuto**: la búsqueda filtra 17,000 productos con ellos. Todo cambio se escribe primero en la base |
 | **DynamoDB `MarketplaceDB`** (AWS) | usuarios, productos, carrito, favoritos | a través de API Gateway + Lambda ([DYNAMODB_LAMBDA.md](DYNAMODB_LAMBDA.md)) |
 
-Las tablas son las de los scripts que ya corriste (`finance_db` corregido y el de PostgreSQL).
+Las tablas son las de los scripts de la carpeta [`database/`](../database/) (`finance_db.sql` para MySQL y
+`operations_db.sql` para PostgreSQL).
 En la base se guardan los estatus como dicen sus scripts (`PENDING`, `PAID`, `CARD`, `TRANSFER`,
 `SUCCESS`, `ACTIVE`, `OPEN`…); la app los traduce al mostrarlos.
 
@@ -122,6 +123,12 @@ Al arrancar muestra qué base usa cada parte, por ejemplo
 | `The PyMySQL driver is not installed` | falta `pip install -r requirements.txt` |
 | `Could not connect to the database (MySQL finance_db)` | MySQL apagado, o usuario/contraseña/puerto incorrectos en `.env` |
 | `PostgreSQL has no categories yet` | falta el paso 3 (`load_to_sql.py`) |
-| `missing columns size, color` | `finance_db` se creó con el script viejo: corre el corregido |
+| `missing columns size, color` | `finance_db` se creó con el script viejo: corre `database/finance_db.sql` |
+| `Access denied` / `password authentication failed` | usuario o contraseña incorrectos en `.env` |
+| `Unknown database` / `database "…" does not exist` | `MYSQL_DATABASE` / `PG_DATABASE` no coincide con el nombre real de tu base |
+| `Connection refused` | el servicio de MySQL o PostgreSQL no está iniciado (Windows: *Servicios*) |
+| `Could not read the products from DynamoDB` | `API_URL` o `MARKETPLACE_API_KEY` incorrectos, o falta pegar la Lambda nueva |
+| `found .env.txt but not .env` | el Bloc de notas agregó `.txt`: renombra el archivo a `.env` |
+| `UnicodeEncodeError` al imprimir ✓ | versión vieja del script; ya está corregido |
 | `PostgreSQL already has categories` | ya cargaste los datos; usa `--replace` si quieres recargarlos |
 | Pedidos de Ana vacíos | es normal: con bases reales los pedidos empiezan en cero |

@@ -18,8 +18,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from View.MainViews.Utils.env_file import load_env_file  # noqa: E402
+from View.MainViews.Utils.env_file import load_env_file, utf8_console  # noqa: E402
 
+utf8_console()
 load_env_file()
 
 from Implementation.DataSource.MemoryStore import MemoryStore  # noqa: E402
@@ -85,4 +86,12 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    main()
+    from Interfaces.DataInterfaces.RepositoryErrors import DatabaseUnavailable
+    try:
+        main()
+    except DatabaseUnavailable as e:
+        print(f"✗ {e}\n  Cause: {e.detail}")
+        sys.exit(1)
+    except RuntimeError as e:          # missing driver
+        print(f"✗ {e}")
+        sys.exit(1)
