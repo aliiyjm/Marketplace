@@ -2,9 +2,8 @@
   1. users (Ana, Carlos, the admin and the demo customers/sellers) -> /usuarios/agregar
   2. the clothing catalog (17,000 products, 100 per call)            -> /productos/cargar
 
-Before running, set (Git Bash):
-    export API_URL="https://xxxx.execute-api.us-east-1.amazonaws.com"
-    export MARKETPLACE_API_KEY="<the same MARKETPLACE_API_KEY you set in the Lambda>"
+Before running, put API_URL and MARKETPLACE_API_KEY in the .env file (the same
+key you set in the Lambda). Values exported in the terminal win over .env.
 
 Usage (from the project root):
     python scripts/load_to_dynamo.py                   # users + 17,000 products
@@ -23,6 +22,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from View.MainViews.Utils.env_file import load_env_file, utf8_console  # noqa: E402
+
+utf8_console()
+load_env_file()     # API_URL and MARKETPLACE_API_KEY from .env (before api_client reads them)
 
 from Implementation.DataSource.MemoryStore import MemoryStore  # noqa: E402
 from Implementation.DataSource.Seed import seed  # noqa: E402

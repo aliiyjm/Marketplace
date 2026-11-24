@@ -12,9 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from View.MainViews.Utils.env_file import load_env_file  # noqa: E402
+from View.MainViews.Utils.env_file import load_env_file, utf8_console  # noqa: E402
 
-load_env_file()
+utf8_console()      # Git Bash on Windows: ✓ / ✗ would crash a cp1252 console
+ENV_FOUND = load_env_file()
 
 FINANCE_TABLES = {
     "orders": ["order_id", "buyer_id", "created_at", "status", "subtotal", "tax_amount", "total_amount"],
@@ -43,7 +44,11 @@ def check_sql(db, tables, out=print):
                 columns = {d[0].lower() for d in cur._cursor.description}
                 count = int(cur.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
         except Exception as e:
-            out(f"  ✗ {table}: {e}")
+            detail = getattr(e, "detail", "") or str(e)
+            if str(e).startswith("Could not connect"):     # no point trying the other tables
+                out(f"  ✗ cannot connect: {detail}")
+                return problems + 1
+            out(f"  ✗ {table}: {detail}")
             problems += 1
             continue
         missing = [c for c in expected if c not in columns]
@@ -81,7 +86,11 @@ def main():
     problems = 0
     backends = {k: os.environ.get(k, "memory") for k in
                 ("FINANCE_BACKEND", "OPERATIONS_BACKEND", "DATA_BACKEND", "PRODUCTS_BACKEND")}
+    if not ENV_FOUND:
+        print(f"✗ No .env file in {ROOT}. Copy .env.example as .env and fill it in.")
     print("Configuration:", ", ".join(f"{k}={v}" for k, v in backends.items()))
+    if all(v == "memory" for v in backends.values()):
+        print("  (everything is 'memory': the app is not using any database; check your .env)")
     if backends["FINANCE_BACKEND"] == "mysql":
         print(f"MySQL {os.environ.get('MYSQL_DATABASE', 'finance_db')} @ {os.environ.get('MYSQL_HOST', 'localhost')}")
         problems += check_sql(mysql_from_env(), FINANCE_TABLES)
@@ -98,6 +107,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except RuntimeError as e:      # e.g. missing driver: a clear message, no traceback
+    except (RuntimeError, ValueError) as e:   # missing driver, bad port number...: no traceback
         print(f"✗ {e}")
         sys.exit(1)

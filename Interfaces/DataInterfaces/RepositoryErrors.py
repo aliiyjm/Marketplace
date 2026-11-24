@@ -4,7 +4,14 @@ from Interfaces.Validators import ValidationError
 
 
 class DatabaseUnavailable(ValidationError):
-    """The database could not be reached or failed (details only in the server log)."""
+    """The database could not be reached or failed.
+
+    str(error) is the friendly text for the web page; `detail` is the technical
+    cause (driver message + a hint) and is only printed in the server console."""
+
+    def __init__(self, message, detail=""):
+        super().__init__(message)
+        self.detail = detail
 
 
 class DuplicateKey(ValidationError):
