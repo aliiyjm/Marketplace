@@ -1,6 +1,8 @@
-"""HTTP client for the API Gateway (CRUD_Marketplace Lambda + DynamoDB).
+"""HTTP client for the users routes of the API Gateway (Lambda + DynamoDB MarketplaceDB).
 
 This is the only part of the view that knows the backend URLs.
+Every users route requires the header x-api-key = MARKETPLACE_API_KEY
+(same value as the Lambda variable); without it the Lambda answers 403.
 """
 import logging
 import os
@@ -15,6 +17,7 @@ API_URL = os.environ.get(
     "API_URL", "https://i4rsywszmf.execute-api.us-east-1.amazonaws.com/"
 ).rstrip("/")
 TIMEOUT = 8  # seconds; avoids hanging forever if AWS does not answer
+API_KEY = os.environ.get("MARKETPLACE_API_KEY", "")
 
 # Route names exactly as they are configured in API Gateway and the Lambda.
 ROUTE_QUERY = "/usuarios/consultar"
@@ -34,7 +37,9 @@ class DuplicateId(ApiError):
 def _failure(action, status):
     """Readable error including the HTTP status, to know what AWS answered."""
     hint = ""
-    if status in (403, 404):
+    if status == 403:
+        hint = " Check that MARKETPLACE_API_KEY matches the Lambda."
+    elif status == 404:
         hint = " Check that API_URL in Utils/api_client.py is your API Gateway URL."
     return ApiError(f"{action} (HTTP {status}).{hint}")
 
@@ -53,7 +58,8 @@ def _clean(user):
 
 def _request(method, route, **kwargs):
     try:
-        resp = requests.request(method, API_URL + route, timeout=TIMEOUT, **kwargs)
+        resp = requests.request(method, API_URL + route, timeout=TIMEOUT,
+                                headers={"x-api-key": API_KEY}, **kwargs)
     except requests.RequestException:
         raise ApiError("Could not connect to the data server.") from None
     try:
@@ -84,16 +90,30 @@ def get_user(user_id):
     return data
 
 
+def get_user_by_email(email):
+    """Sign-in lookup: the Lambda uses the GSI1 index (EMAIL#...), no table scan."""
+    status, data = _request("GET", ROUTE_QUERY, params={"email": email})
+    if status == 404:
+        return None
+    if status != 200 or not isinstance(data, dict):
+        raise _failure("Could not fetch the user", status)
+    return data
+
+
 def add_user(user):
-    status, _ = _request("POST", ROUTE_ADD, json=_clean(user))
-    if status == 409:  # the updated Lambda rejects repeated IDs
+    status, data = _request("POST", ROUTE_ADD, json=_clean(user))
+    if status == 409 and isinstance(data, dict) and data.get("code") == "EMAIL_EXISTS":
+        raise ApiError("That email is already registered.")
+    if status == 409:  # the Lambda rejects repeated IDs
         raise DuplicateId("A user with that ID already exists.")
     if status != 200:
         raise _failure("Could not add the user", status)
 
 
 def update_user(user):
-    status, _ = _request("PUT", ROUTE_UPDATE, json=_clean(user))
+    status, data = _request("PUT", ROUTE_UPDATE, json=_clean(user))
+    if status == 409:
+        raise ApiError("That email is already registered.")
     if status != 200:
         raise _failure("Could not save the user", status)
 

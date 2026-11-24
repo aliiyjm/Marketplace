@@ -75,5 +75,6 @@ class UserServiceImplementation:
         self.repo.delete_user(user_id)
         if self.store is not None:
             seller = self.store.seller_by_user(user_id)
-            if seller:
-                seller["status"] = "suspended"   # hide their products from the catalog
+            if seller:   # hide their products from the catalog (PostgreSQL sellers.status)
+                self.store.ops.set_seller_status(seller["seller_id"], "suspended")
+                self.store.reload_meta(force=True)

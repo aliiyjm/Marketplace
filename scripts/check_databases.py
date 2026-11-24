@@ -1,0 +1,103 @@
+"""Check that every database the app is configured to use is reachable and has
+the expected tables and columns. Run it on your computer before starting the app:
+
+    python scripts/check_databases.py
+
+It only READS (SELECT ... WHERE 1 = 0 and COUNT(*)); it never changes data.
+"""
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from View.MainViews.Utils.env_file import load_env_file  # noqa: E402
+
+load_env_file()
+
+FINANCE_TABLES = {
+    "orders": ["order_id", "buyer_id", "created_at", "status", "subtotal", "tax_amount", "total_amount"],
+    "order_items": ["item_id", "order_id", "product_id", "quantity", "unit_price", "size", "color"],
+    "payments": ["payment_id", "order_id", "payment_method", "card_last4", "status", "processed_at"],
+    "shipping_addresses": ["address_id", "order_id", "street", "city", "state", "zip_code"],
+    "invoices": ["invoice_id", "order_id", "pdf_receipt_url", "issued_at"],
+    "order_status_history": ["history_id", "order_id", "old_status", "new_status", "changed_at"],
+}
+OPERATIONS_TABLES = {
+    "categories": ["category_id", "parent_id", "name", "slug", "is_active"],
+    "sellers": ["seller_id", "user_id", "store_name", "tax_id", "rating", "status", "created_at"],
+    "reviews": ["review_id", "product_id", "buyer_id", "rating", "comment", "created_at"],
+    "analytics": ["sale_id", "product_id", "category_id", "seller_id", "quantity_sold", "sale_date"],
+    "alerts": ["alert_id", "product_id", "seller_id", "current_stock", "threshold_limit", "alert_status", "updated_at"],
+}
+
+
+def check_sql(db, tables, out=print):
+    """Returns the number of problems found."""
+    problems = 0
+    for table, expected in tables.items():
+        try:
+            with db.transaction() as cur:
+                cur.execute(f"SELECT * FROM {table} WHERE 1 = 0")      # fixed names from the dict above
+                columns = {d[0].lower() for d in cur._cursor.description}
+                count = int(cur.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"])
+        except Exception as e:
+            out(f"  ✗ {table}: {e}")
+            problems += 1
+            continue
+        missing = [c for c in expected if c not in columns]
+        if missing:
+            out(f"  ✗ {table}: missing columns {', '.join(missing)} (run the corrected script)")
+            problems += 1
+        else:
+            out(f"  ✓ {table} ({count} rows)")
+    return problems
+
+
+def check_api(out=print):
+    from View.MainViews.Utils.product_api import ProductApiClient, ProductApiError
+    from View.MainViews.Utils.quick_api import QuickApiClient
+    from View.MainViews.Utils import api_client
+    problems = 0
+    client = ProductApiClient()
+    checks = [
+        ("products  GET /productos/consultar", lambda: client.list_page(limit=1)),
+        ("users     GET /usuarios/consultar", lambda: api_client.get_user("u-ana00001")),
+        ("carts     GET /carrito/consultar", lambda: QuickApiClient().get_cart("u-ana00001")),
+    ]
+    for label, call in checks:
+        try:
+            call()
+            out(f"  ✓ {label}")
+        except (ProductApiError, api_client.ApiError) as e:
+            out(f"  ✗ {label}: {e}")
+            problems += 1
+    return problems
+
+
+def main():
+    from Implementation.DataSource.SqlConnection import mysql_from_env, postgres_from_env
+    problems = 0
+    backends = {k: os.environ.get(k, "memory") for k in
+                ("FINANCE_BACKEND", "OPERATIONS_BACKEND", "DATA_BACKEND", "PRODUCTS_BACKEND")}
+    print("Configuration:", ", ".join(f"{k}={v}" for k, v in backends.items()))
+    if backends["FINANCE_BACKEND"] == "mysql":
+        print(f"MySQL {os.environ.get('MYSQL_DATABASE', 'finance_db')} @ {os.environ.get('MYSQL_HOST', 'localhost')}")
+        problems += check_sql(mysql_from_env(), FINANCE_TABLES)
+    if backends["OPERATIONS_BACKEND"] == "postgres":
+        print(f"PostgreSQL {os.environ.get('PG_DATABASE', 'operations_db')} @ {os.environ.get('PG_HOST', 'localhost')}")
+        problems += check_sql(postgres_from_env(), OPERATIONS_TABLES)
+    if "aws" in (backends["DATA_BACKEND"], backends["PRODUCTS_BACKEND"]):
+        print("API Gateway + Lambda (DynamoDB MarketplaceDB)")
+        problems += check_api()
+    print("\nAll good." if not problems else f"\n{problems} problem(s) found.")
+    sys.exit(1 if problems else 0)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except RuntimeError as e:      # e.g. missing driver: a clear message, no traceback
+        print(f"✗ {e}")
+        sys.exit(1)

@@ -2,11 +2,14 @@
 import math
 
 from Implementation.DataSource.Mappers import (is_public, product_to_dto,
-                                               refresh_rating, review_to_dto)
+                                               refresh_rating, review_to_dto,
+                                               search_text)
 from Interfaces.MainServiceInterface.MainDTO import (PER_PAGE, CatalogPage,
                                                      CategoryDTO, RatingSummaryDTO,
                                                      SellerSummaryDTO, valid_product_id)
 from Interfaces.MainServiceInterface.MainServiceInterface import MainServiceInterface
+from Interfaces.DataInterfaces.RepositoryErrors import DuplicateKey
+from Interfaces.ProductServiceInterface.ProductServiceInterface import ProductStoreError
 from Interfaces.Validators import ValidationError, normalize
 
 _SORT_KEYS = {
@@ -24,6 +27,7 @@ class MainServiceImplementation(MainServiceInterface):
 
     # ---------- categories ----------
     def category_tree(self):
+        self.store.reload_meta()          # PostgreSQL: refresh the cached categories every minute
         cats = self.store.categories.values()
         tree = []
         for top in sorted((c for c in cats if c["parent_id"] is None and c["is_active"]),
@@ -48,6 +52,7 @@ class MainServiceImplementation(MainServiceInterface):
 
     # ---------- catalog ----------
     def search(self, query):
+        self.store.reload_meta()
         store = self.store
         category, scope = self._category_scope(query.category)
         terms = normalize(query.q).split()
@@ -77,9 +82,30 @@ class MainServiceImplementation(MainServiceInterface):
         if not valid_product_id(product_id):
             return None
         p = self.store.products.get(product_id)
+        if not p:
+            return None
+        p = self._refresh(p)
         if not p or not is_public(self.store, p):
             return None
         return product_to_dto(self.store, p)
+
+    def _refresh(self, cached):
+        """Product page: read the product again from the database so price and
+        stock are current. If the database cannot be reached, show the cache."""
+        try:
+            fresh = self.store.product_repo.get(cached["product_id"])
+        except ProductStoreError:
+            return cached
+        if fresh is cached:              # memory backend: the cache is the data
+            return cached
+        if fresh is None:                # removed from the database
+            cached["status"] = "deleted"
+            return None
+        fresh.update(rating=cached.get("rating"), review_count=cached.get("review_count", 0))
+        fresh["_search"] = search_text(self.store, fresh)
+        with self.store.lock:
+            self.store.products[fresh["product_id"]] = fresh
+        return fresh
 
     def related(self, product, limit=4):
         """Other products of the same subcategory (for the product page)."""
@@ -95,32 +121,25 @@ class MainServiceImplementation(MainServiceInterface):
             return None
         return SellerSummaryDTO(s["seller_id"], s["store_name"], s["rating"], s["status"])
 
-    # ---------- reviews ----------
+    # ---------- reviews (PostgreSQL through store.ops) ----------
     def reviews(self, product_id, limit=5):
-        rows = sorted(self.store.reviews_by_product.get(product_id, []),
-                      key=lambda r: r["created_at"], reverse=True)
-        return [review_to_dto(self.store, r) for r in rows[:limit]]
+        return [review_to_dto(self.store, r) for r in self.store.ops.reviews_for(product_id, limit)]
 
     def rating_summary(self, product_id):
-        rows = self.store.reviews_by_product.get(product_id, [])
-        count = len(rows)
+        counts = self.store.ops.rating_counts(product_id)
+        count = sum(counts.values())
         dist = []
         for stars in range(5, 0, -1):
-            n = sum(1 for r in rows if r["rating"] == stars)
-            pct = round(n * 100 / count) if count else 0
-            dist.append((stars, n, pct))
-        avg = round(sum(r["rating"] for r in rows) / count, 1) if count else None
+            n = counts.get(stars, 0)
+            dist.append((stars, n, round(n * 100 / count) if count else 0))
+        avg = round(sum(st * n for st, n in counts.items()) / count, 1) if count else None
         return RatingSummaryDTO(average=avg, count=count, distribution=dist)
 
     def _bought(self, user_id, product_id):
-        for order in self.store.orders.values():
-            if order["buyer_id"] == user_id and order["status"] != "Cancelled":
-                if any(i["product_id"] == product_id for i in self.store.order_items[order["order_id"]]):
-                    return True
-        return False
+        return self.store.finance.has_bought(user_id, product_id)
 
     def _reviewed(self, user_id, product_id):
-        return any(r["buyer_id"] == user_id for r in self.store.reviews_by_product.get(product_id, []))
+        return self.store.ops.has_reviewed(user_id, product_id)
 
     def can_review(self, user_id, product_id):
         return bool(user_id) and self._bought(user_id, product_id) and not self._reviewed(user_id, product_id)
@@ -130,14 +149,13 @@ class MainServiceImplementation(MainServiceInterface):
             raise ValidationError("Product not found.")
         if not self._bought(user_id, product_id):
             raise ValidationError("Only customers who bought this product can review it.")
-        with self.store.lock:
-            if self._reviewed(user_id, product_id):
-                raise ValidationError("You already reviewed this product.")
-            review_id = self.store.next_id("reviews")
-            review = {"review_id": review_id, "product_id": product_id, "buyer_id": user_id,
-                      "rating": form.rating, "comment": form.comment,
-                      "created_at": self.store.now().isoformat()}
-            self.store.reviews[review_id] = review
-            self.store.reviews_by_product[product_id].append(review)
-            refresh_rating(self.store, product_id)
+        if self._reviewed(user_id, product_id):
+            raise ValidationError("You already reviewed this product.")
+        try:
+            review_id = self.store.ops.add_review({
+                "product_id": product_id, "buyer_id": user_id, "rating": form.rating,
+                "comment": form.comment, "created_at": self.store.now().isoformat()})
+        except DuplicateKey:
+            raise ValidationError("You already reviewed this product.") from None
+        refresh_rating(self.store, product_id)
         return review_id

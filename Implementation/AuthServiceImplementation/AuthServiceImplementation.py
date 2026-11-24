@@ -61,14 +61,10 @@ class AuthServiceImplementation(AuthServiceInterface):
         user_id = self.users.create(user_form, password_hash=generate_password_hash(form.password),
                                     created_at=self.store.now().isoformat())
         if form.role == "seller":
-            with self.store.lock:
-                seller_no = self.store.next_id("sellers")
-                seller_id = f"SEL-{seller_no:04d}"
-                self.store.sellers[seller_id] = {
-                    "seller_id": seller_id, "user_id": user_id, "store_name": form.store_name,
-                    "tax_id": form.tax_id, "rating": 0.0, "status": "active",
-                    "created_at": self.store.now().isoformat(), "_tops": [],
-                }
+            self.store.ops.create_seller({
+                "user_id": user_id, "store_name": form.store_name, "tax_id": form.tax_id,
+                "rating": 0.0, "status": "active", "created_at": self.store.now().isoformat()})
+            self.store.reload_meta(force=True)
         return self.session_user(user_id)
 
     def session_user(self, user_id):

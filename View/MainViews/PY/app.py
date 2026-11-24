@@ -17,8 +17,14 @@ BASE = Path(__file__).resolve().parents[1]       # View/MainViews
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Database settings and keys come from .env (before any module reads them).
+from View.MainViews.Utils.env_file import load_env_file  # noqa: E402
+
+load_env_file()
+
 from flask import Flask, g, render_template, send_from_directory  # noqa: E402
 
+from Interfaces.DataInterfaces.RepositoryErrors import DatabaseUnavailable  # noqa: E402
 from Services.ServiceContainer import build_services  # noqa: E402
 from View.MainViews.PY import (account_views, admin_views, auth_views,  # noqa: E402
                                cart_views, seller_views, shop_views)
@@ -100,10 +106,19 @@ def create_app(container=None, config=None):
 
     for code in messages:
         app.register_error_handler(code, error_page)
+
+    def database_down(error):
+        # A database is unreachable: friendly page instead of a crash (details are in the log).
+        return render_template("errors/error.html", code=503, title="We'll be right back",
+                               text=str(error) or "A database is not available right now."), 503
+
+    app.register_error_handler(DatabaseUnavailable, database_down)
     return app
 
 
 if __name__ == "__main__":
     application = create_app()
-    print(f"{STORE_NAME} running on http://127.0.0.1:5000  (backend: {os.environ.get('DATA_BACKEND', 'memory')})")
+    backends = ", ".join(f"{k.split('_')[0].lower()}={os.environ.get(k, 'memory')}" for k in
+                         ("DATA_BACKEND", "PRODUCTS_BACKEND", "FINANCE_BACKEND", "OPERATIONS_BACKEND"))
+    print(f"{STORE_NAME} running on http://127.0.0.1:5000  ({backends})")
     application.run(host="127.0.0.1", port=5000, debug=os.environ.get("FLASK_DEBUG") == "1")

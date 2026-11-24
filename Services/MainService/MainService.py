@@ -3,8 +3,13 @@
 Services receive raw input (query string / form), turn it into DTOs and call
 the Implementation through its Interface. The View only talks to Services.
 """
+import logging
+
 from Interfaces.MainServiceInterface.MainDTO import (CatalogQuery, ProductPageDTO,
                                                      ReviewForm)
+from Interfaces.Validators import ValidationError
+
+log = logging.getLogger("main")
 
 
 class MainService:
@@ -21,13 +26,18 @@ class MainService:
         product = self.impl.get_product(product_id)
         if product is None:
             return None
+        try:
+            can_review = self.impl.can_review(user_id, product_id) if user_id else False
+        except ValidationError:      # orders database down: the page still works without the form
+            log.warning("Could not check purchases of %s", user_id)
+            can_review = False
         return ProductPageDTO(
             product=product,
             seller=self.impl.get_seller(product.seller_id),
             reviews=self.impl.reviews(product_id),
             rating=self.impl.rating_summary(product_id),
             related=self.impl.related(product),
-            can_review=self.impl.can_review(user_id, product_id) if user_id else False,
+            can_review=can_review,
         )
 
     def add_review(self, user_id, product_id, form_data):

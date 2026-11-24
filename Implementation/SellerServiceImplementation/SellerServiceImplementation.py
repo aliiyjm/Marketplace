@@ -4,12 +4,12 @@ Every method receives the seller_id resolved from the session; product
 lookups always check `seller_id` so one seller cannot edit another's items.
 """
 import math
-from collections import Counter
 from datetime import timedelta
 
 from Implementation.DataSource.Inventory import refresh_alert
 from Implementation.DataSource.Mappers import product_to_dto, search_text
 from Interfaces.MainServiceInterface.MainDTO import color_key, valid_product_id
+from Interfaces.ProductServiceInterface.ProductServiceInterface import ProductExists
 from Interfaces.SellerServiceInterface.SellerDTO import (AlertDTO, DailyUnitsDTO,
                                                          DashboardDTO, KpiDTO,
                                                          SellerProductsPage, TopProductDTO)
@@ -40,49 +40,43 @@ class SellerServiceImplementation(SellerServiceInterface):
 
     # ---------- dashboard ----------
     def dashboard(self, seller_id, days=30):
+        """Sales from analytics and stock alerts, read from store.ops on every request."""
         store = self.store
+        store.reload_meta()
         seller = store.sellers[seller_id]
         today = store.now().date()
         since = today - timedelta(days=days - 1)
-        sales = [s for s in store.analytics if s["seller_id"] == seller_id
-                 and s["sale_date"] >= since.isoformat()]
-        units = sum(s["quantity_sold"] for s in sales)
+        per_day = {str(k)[:10]: int(v) for k, v in store.ops.units_by_day(seller_id, since).items()}
+        units = sum(per_day.values())
 
-        per_day = Counter()
-        for s in sales:
-            per_day[s["sale_date"]] += s["quantity_sold"]
         last14 = [today - timedelta(days=d) for d in range(13, -1, -1)]
-        peak = max([per_day[d.isoformat()] for d in last14] + [1])
-        daily = [DailyUnitsDTO(day=_short(d), units=per_day[d.isoformat()],
-                               height=int(round(per_day[d.isoformat()] / peak * 20)) * 5)
+        peak = max([per_day.get(d.isoformat(), 0) for d in last14] + [1])
+        daily = [DailyUnitsDTO(day=_short(d), units=per_day.get(d.isoformat(), 0),
+                               height=int(round(per_day.get(d.isoformat(), 0) / peak * 20)) * 5)
                  for d in last14]
 
-        per_product = Counter()
-        for s in sales:
-            per_product[s["product_id"]] += s["quantity_sold"]
         top = []
-        for pid, qty in per_product.most_common(5):
+        for pid, qty in store.ops.top_products(seller_id, since, 5):
             p = store.products.get(pid)
             if p:
                 dto = product_to_dto(store, p)
-                top.append(TopProductDTO(pid, dto.name, f"{dto.parent_category_name} › {dto.category_name}", qty))
+                top.append(TopProductDTO(pid, dto.name, f"{dto.parent_category_name} › {dto.category_name}", int(qty)))
 
-        own_ids = {p["product_id"] for p in store.products.values() if p["seller_id"] == seller_id}
-        alerts = sorted((a for a in store.alerts.values() if a["product_id"] in own_ids),
-                        key=lambda a: (a["alert_status"] != "Open", a["current_stock"]))
-        open_alerts = sum(1 for a in alerts if a["alert_status"] == "Open")
+        alerts = store.ops.alerts_for_seller(seller_id, 6)
+        open_alerts = store.ops.count_open_alerts(seller_id)
         active = sum(1 for p in store.products.values()
                      if p["seller_id"] == seller_id and p["status"] == "active")
-        rating = seller.get("rating") or 0
+        rating = float(seller.get("rating") or 0)
         kpis = [
             KpiDTO("Units sold", f"{units:,}", f"last {days} days"),
             KpiDTO("Active products", f"{active:,}", "visible in the catalog"),
             KpiDTO("Store rating", f"{rating:.1f}" if rating else "—", "out of 5"),
             KpiDTO("Open stock alerts", str(open_alerts), "below your threshold", alert=open_alerts > 0),
         ]
-        alert_dtos = [AlertDTO(a["alert_id"], a["product_id"], store.products[a["product_id"]]["name"],
+        alert_dtos = [AlertDTO(a["alert_id"], a["product_id"],
+                               store.products.get(a["product_id"], {}).get("name", a["product_id"]),
                                a["current_stock"], a["threshold_limit"], a["alert_status"])
-                      for a in alerts[:6]]
+                      for a in alerts]
         return DashboardDTO(store_name=seller["store_name"], kpis=kpis, daily=daily, top_products=top,
                             alerts=alert_dtos,
                             period_label=f"{_short(last14[0])} – {_short(today)}")
@@ -148,11 +142,19 @@ class SellerServiceImplementation(SellerServiceInterface):
         category = self._check_category(form.category_id)
         with self.store.lock:
             number = max(int(pid[4:]) for pid in self.store.products) + 1 if self.store.products else 1
-            product_id = f"PRD-{number:06d}"
-            record = {"PK": f"PRODUCT#{product_id}", "SK": "METADATA", "product_id": product_id,
-                      "seller_id": seller_id, "created_at": self.store.now().isoformat(),
-                      "rating": None, "review_count": 0}
-            self._apply_form(record, form, category)
+            for attempt in range(3):   # another app instance may have taken the id meanwhile
+                product_id = f"PRD-{number + attempt:06d}"
+                record = {"PK": f"PRODUCT#{product_id}", "SK": "METADATA", "product_id": product_id,
+                          "seller_id": seller_id, "created_at": self.store.now().isoformat(),
+                          "rating": None, "review_count": 0}
+                self._apply_form(record, form, category)
+                try:
+                    self.store.product_repo.create(record)      # database first, then cache
+                    break
+                except ProductExists:
+                    continue
+            else:
+                raise ValidationError("Could not generate a product id. Please try again.")
             self.store.products[product_id] = record
             refresh_alert(self.store, record)
         return product_id
@@ -163,17 +165,22 @@ class SellerServiceImplementation(SellerServiceInterface):
             record = self._own(seller_id, product_id)
             if not record:
                 raise ValidationError("Product not found.")
-            self._apply_form(record, form, category)
-            refresh_alert(self.store, record)
+            updated = dict(record)
+            self._apply_form(updated, form, category)
+            self.store.product_repo.save(updated)              # database first, then cache
+            self.store.products[product_id] = updated
+            refresh_alert(self.store, updated)
 
     def delete_product(self, seller_id, product_id):
         with self.store.lock:
             record = self._own(seller_id, product_id)
             if not record:
                 raise ValidationError("Product not found.")
-            record["status"] = "deleted"
-            for user_favs in self.store.favorites.values():
-                user_favs.pop(product_id, None)
+            deleted = dict(record, status="deleted")
+            self.store.product_repo.save(deleted)
+            self.store.products[product_id] = deleted
+            # Favorites and carts that still point to it simply stop showing it
+            # (both lists skip products that are not public).
 
     @staticmethod
     def dynamo_preview(product):

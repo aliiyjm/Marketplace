@@ -1,26 +1,26 @@
-"""Stock alerts (POSTGRES_ALERTS). Called whenever a product's stock changes."""
+"""Stock alerts (POSTGRES alerts). Called whenever a product's stock changes."""
 
 
 def refresh_alert(store, product):
     """Open an alert when stock drops below the seller's threshold; resolve it
-    when the product is restocked."""
+    when the product is restocked. Writes through store.ops (memory or PostgreSQL)."""
+    ops = store.ops
     with store.lock:
-        open_alert = next((a for a in store.alerts.values()
-                           if a["product_id"] == product["product_id"] and a["alert_status"] == "Open"), None)
+        open_alert = ops.open_alert(product["product_id"])
         low = product["stock"] < product.get("threshold_limit", 0)
+        now = store.now().isoformat()
         if low:
-            if open_alert:
-                open_alert["current_stock"] = product["stock"]
-                open_alert["threshold_limit"] = product["threshold_limit"]
-            else:
-                alert_id = store.next_id("alerts")
-                store.alerts[alert_id] = {
-                    "alert_id": alert_id, "product_id": product["product_id"],
-                    "current_stock": product["stock"], "threshold_limit": product["threshold_limit"],
-                    "alert_status": "Open", "seller_id": product["seller_id"],
-                    "updated_at": store.now().isoformat(),
-                }
-        elif open_alert:
-            open_alert.update(alert_status="Resolved", current_stock=product["stock"],
-                              threshold_limit=product["threshold_limit"],
-                              updated_at=store.now().isoformat())
+            if open_alert is None:
+                ops.insert_alert({"product_id": product["product_id"], "seller_id": product["seller_id"],
+                                  "current_stock": product["stock"],
+                                  "threshold_limit": product["threshold_limit"],
+                                  "alert_status": "Open", "updated_at": now})
+            elif (open_alert["current_stock"], open_alert["threshold_limit"]) != \
+                    (product["stock"], product["threshold_limit"]):
+                ops.update_alert(open_alert["alert_id"], {"current_stock": product["stock"],
+                                                          "threshold_limit": product["threshold_limit"],
+                                                          "updated_at": now})
+        elif open_alert is not None:
+            ops.update_alert(open_alert["alert_id"], {"alert_status": "Resolved", "current_stock": product["stock"],
+                                                      "threshold_limit": product["threshold_limit"],
+                                                      "updated_at": now})

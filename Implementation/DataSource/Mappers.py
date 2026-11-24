@@ -24,8 +24,7 @@ def product_to_dto(store, p):
 
 
 def review_to_dto(store, r):
-    buyer = store.users.get(r["buyer_id"], {})
-    name = buyer.get("name", "Customer")
+    name = store.user_name(r["buyer_id"])
     parts = name.split()
     short = parts[0] if len(parts) < 2 else f"{parts[0]} {parts[1][0]}."
     return ReviewDTO(review_id=r["review_id"], product_id=r["product_id"], buyer_id=r["buyer_id"],
@@ -57,7 +56,18 @@ def search_text(store, record):
 
 
 def refresh_rating(store, product_id):
-    reviews = store.reviews_by_product.get(product_id, [])
+    """Recompute one product's cached rating from its reviews (store.ops)."""
+    counts = store.ops.rating_counts(product_id)
+    total = sum(counts.values())
     product = store.products[product_id]
-    product["review_count"] = len(reviews)
-    product["rating"] = round(sum(x["rating"] for x in reviews) / len(reviews), 1) if reviews else None
+    product["review_count"] = total
+    product["rating"] = round(sum(s * n for s, n in counts.items()) / total, 1) if total else None
+
+
+def apply_ratings(store):
+    """Cache every product's rating with ONE query (startup)."""
+    stats = store.ops.rating_stats()
+    for pid, product in store.products.items():
+        avg, count = stats.get(pid, (None, 0))
+        product["review_count"] = int(count)
+        product["rating"] = round(float(avg), 1) if count else None

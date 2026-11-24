@@ -252,12 +252,20 @@ def seed(store, product_count=17000, rng_seed=42):
         }
         store.products[pid] = record
 
+        reviewers = set()
         for _ in range(r.choice([0, 0, 1, 2, 3, 4])):
-            review_id += 1
             stars = r.choice([5, 5, 5, 5, 4, 4, 4, 3, 2, 1])
-            review = {"review_id": review_id, "product_id": pid, "buyer_id": r.choice(buyers),
-                      "rating": stars, "comment": r.choice(COMMENTS[stars]),
-                      "created_at": (now - timedelta(days=r.randint(1, 120))).isoformat()}
+            buyer = r.choice(buyers)
+            comment = r.choice(COMMENTS[stars])
+            created = (now - timedelta(days=r.randint(1, 120))).isoformat()
+            # One review per buyer and product (UNIQUE in PostgreSQL). The random
+            # draws above still happen, so the rest of the catalog stays identical.
+            if buyer in reviewers:
+                continue
+            reviewers.add(buyer)
+            review_id += 1
+            review = {"review_id": review_id, "product_id": pid, "buyer_id": buyer,
+                      "rating": stars, "comment": comment, "created_at": created}
             store.reviews[review_id] = review
             store.reviews_by_product[pid].append(review)
         refresh_rating(store, pid)

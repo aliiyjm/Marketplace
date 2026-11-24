@@ -4,6 +4,7 @@ from collections import Counter
 from Implementation.DataSource.Mappers import search_text
 from Interfaces.AdminServiceInterface.AdminDTO import CategoryRowDTO
 from Interfaces.AdminServiceInterface.AdminServiceInterface import AdminServiceInterface
+from Interfaces.DataInterfaces.RepositoryErrors import DuplicateKey
 from Interfaces.Validators import ValidationError
 
 
@@ -21,6 +22,7 @@ class AdminServiceImplementation(AdminServiceInterface):
                               0 if c["parent_id"] is None else 1, total)
 
     def category_rows(self):
+        self.store.reload_meta()
         counts = self._counts()
         cats = sorted(self.store.categories.values(), key=lambda c: c["name"])
         rows = []
@@ -47,11 +49,15 @@ class AdminServiceImplementation(AdminServiceInterface):
                 raise ValidationError("This category has subcategories, so it must stay top-level.")
 
     def create_category(self, form):
+        """Write to the database first (store.ops), then refresh the cache."""
         with self.store.lock:
             self._validate(form)
-            cid = self.store.next_id("categories")
-            self.store.categories[cid] = {"category_id": cid, "parent_id": form.parent_id, "name": form.name,
-                                          "slug": form.slug, "is_active": form.is_active}
+            try:
+                cid = self.store.ops.create_category({"parent_id": form.parent_id, "name": form.name,
+                                                      "slug": form.slug, "is_active": form.is_active})
+            except DuplicateKey:
+                raise ValidationError("That slug is already in use.") from None
+            self.store.reload_meta(force=True)
         return cid
 
     def update_category(self, category_id, form):
@@ -59,8 +65,12 @@ class AdminServiceImplementation(AdminServiceInterface):
             if category_id not in self.store.categories:
                 raise ValidationError("Category not found.")
             self._validate(form, category_id)
-            self.store.categories[category_id].update(parent_id=form.parent_id, name=form.name,
-                                                      slug=form.slug, is_active=form.is_active)
+            try:
+                self.store.ops.update_category(category_id, {"parent_id": form.parent_id, "name": form.name,
+                                                             "slug": form.slug, "is_active": form.is_active})
+            except DuplicateKey:
+                raise ValidationError("That slug is already in use.") from None
+            self.store.reload_meta(force=True)
             # Category names are part of the search text: refresh affected products.
             scope = {category_id} | {c["category_id"] for c in self.store.categories.values()
                                      if c["parent_id"] == category_id}
@@ -73,8 +83,11 @@ class AdminServiceImplementation(AdminServiceInterface):
             c = self.store.categories.get(category_id)
             if not c:
                 raise ValidationError("Category not found.")
-            c["is_active"] = not c["is_active"]
-            return c["is_active"]
+            new_value = not c["is_active"]
+            self.store.ops.update_category(category_id, {"parent_id": c["parent_id"], "name": c["name"],
+                                                         "slug": c["slug"], "is_active": new_value})
+            self.store.reload_meta(force=True)
+            return new_value
 
     def top_categories(self):
         return [(c["category_id"], c["name"]) for c in sorted(self.store.categories.values(), key=lambda c: c["name"])

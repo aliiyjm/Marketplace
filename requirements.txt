@@ -1,4 +1,7 @@
 Flask>=3.0,<4
 requests>=2.32,<3
+# database drivers (only needed when FINANCE_BACKEND=mysql / OPERATIONS_BACKEND=postgres)
+PyMySQL>=1.1,<2
+psycopg[binary]>=3.1,<4
 # development / automated tests
 pytest>=8
