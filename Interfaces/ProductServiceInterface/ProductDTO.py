@@ -7,6 +7,10 @@
 The same class validates the payload in the Lambda (never trust the caller),
 converts to/from the DynamoDB item and to/from the record the Flask app keeps.
 Prices travel as strings ("499.00") so no float rounding ever happens.
+
+Photos: `image_url` is optional. It can only point to a photo the app itself
+stored (S3 bucket of the Lambda, or /media/ in memory mode) with a random
+name: never an arbitrary URL taken from user input.
 """
 import re
 from dataclasses import dataclass, field
@@ -23,6 +27,31 @@ ATTR_KEY_RE = re.compile(r"[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 &/().-]{0,39}")
 MAX_ATTRIBUTES = 15
 SK_PRODUCT = "METADATA"
 PK_PREFIX = "PRODUCT#"
+
+# ---------- product photos ----------
+IMAGE_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}   # never SVG (it can run scripts)
+MAX_IMAGE_BYTES = 1_500_000          # what the Lambda accepts (the Flask app sends a re-encoded JPEG)
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024   # what a seller may upload in the form (before re-encoding)
+IMAGE_KEY_RE = re.compile(r"products/PRD-\d{6}/[0-9a-f]{32}\.(?:jpg|png|webp)")
+IMAGE_URL_RE = re.compile(r"(?:https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.amazonaws\.com/|/media/)"
+                          + IMAGE_KEY_RE.pattern)
+
+
+def image_type(data):
+    """Real type of the file from its first bytes (magic numbers), or None.
+    The file name and the declared Content-Type are never trusted."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def image_key(product_id, token, content_type):
+    """S3 key of a photo: products/PRD-000123/<32 random hex>.jpg"""
+    return f"products/{product_id}/{token}.{IMAGE_TYPES[content_type]}"
 
 
 def _str_list(raw, *, name, max_items, max_len):
@@ -56,6 +85,7 @@ class ProductItem:
     attributes: dict = field(default_factory=dict)
     threshold_limit: int = 0
     created_at: str = ""
+    image_url: str = ""
 
     # ---------- validation of untrusted input (API payload) ----------
     @classmethod
@@ -89,6 +119,11 @@ class ProductItem:
         color_key = data.get("color_key", "gray")
         if color_key not in COLOR_PALETTE.values():
             errors.append("color_key is invalid.")
+        image_url = data.get("image_url") or ""
+        if image_url and not (isinstance(image_url, str) and len(image_url) <= 300
+                              and IMAGE_URL_RE.fullmatch(image_url)):
+            errors.append("image_url is invalid.")
+            image_url = ""
 
         attributes = {}
         raw_attrs = data.get("attributes", {})
@@ -103,7 +138,7 @@ class ProductItem:
 
         item = dict(
             product_id=product_id, seller_id=seller_id, category_slug=slug, status=status,
-            kind=kind, color_key=color_key, attributes=attributes,
+            kind=kind, color_key=color_key, attributes=attributes, image_url=image_url,
             name=run(lambda: clean_text(data.get("name"), 120, field="name", required=True), ""),
             description=run(lambda: clean_text(data.get("description", ""), 2000, field="description",
                                                multiline=True), ""),
@@ -124,7 +159,7 @@ class ProductItem:
 
     # ---------- DynamoDB ----------
     def to_item(self):
-        return {
+        item = {
             "PK": PK_PREFIX + self.product_id, "SK": SK_PRODUCT, "entity": "PRODUCT",
             "GSI1PK": f"CATEGORY#{self.category_slug}", "GSI1SK": f"PRICE#{self.price:010.2f}",
             "product_id": self.product_id, "name": self.name, "description": self.description,
@@ -134,6 +169,9 @@ class ProductItem:
             "color_key": self.color_key, "kind": self.kind, "attributes": dict(self.attributes),
             "threshold_limit": self.threshold_limit, "created_at": self.created_at,
         }
+        if self.image_url:              # products without a photo keep the SVG silhouette
+            item["image_url"] = self.image_url
+        return item
 
     @classmethod
     def from_item(cls, item):
@@ -146,7 +184,7 @@ class ProductItem:
             sizes=tuple(item.get("sizes", [])), colors=tuple(item.get("colors", [])),
             color_key=item.get("color_key", "gray"), kind=item.get("kind", "tshirt"),
             attributes=dict(item.get("attributes", {})), threshold_limit=int(item.get("threshold_limit", 0)),
-            created_at=item.get("created_at", ""),
+            created_at=item.get("created_at", ""), image_url=item.get("image_url", ""),
         )
 
     # ---------- JSON (API Gateway) ----------
@@ -169,7 +207,7 @@ class ProductItem:
     def from_record(cls, record, category_slug):
         data = {k: record.get(k) for k in (
             "product_id", "name", "description", "category_id", "seller_id", "status", "kind",
-            "color_key", "attributes", "threshold_limit", "created_at", "stock")}
+            "color_key", "attributes", "threshold_limit", "created_at", "stock", "image_url")}
         data.update(category_slug=category_slug, price=f"{record['price']:.2f}",
                     sizes=list(record["sizes"]), colors=list(record["colors"]))
         return cls.from_payload(data)

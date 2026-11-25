@@ -1,11 +1,11 @@
 {% extends "layout_panel.html" %}
-{% from "partials/garment.html" import garment %}
+{% from "partials/garment.html" import garment, product_visual %}
 {% block title %}Delete product{% endblock %}
 {% block content %}
 <h1 class="h-page">Delete product</h1>
 <section class="card confirm-card" aria-labelledby="q">
   <p id="q" class="confirm-card__question">Are you sure you want to delete this product?</p>
-  <div class="cell-product">{{ garment(product.kind, product.color_key, "sm") }}
+  <div class="cell-product">{{ product_visual(product, "sm") }}
     <dl class="details">
       <dt>ID</dt><dd class="mono">{{ product.product_id }}</dd>
       <dt>Name</dt><dd>{{ product.name }}</dd>

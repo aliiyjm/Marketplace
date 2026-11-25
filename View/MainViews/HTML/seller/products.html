@@ -1,6 +1,6 @@
 {% extends "layout_panel.html" %}
 {% import "icons.html" as ic %}
-{% from "partials/garment.html" import garment %}
+{% from "partials/garment.html" import garment, product_visual %}
 {% from "partials/pagination.html" import pagination %}
 {% block title %}My products{% endblock %}
 {% block content %}
@@ -28,7 +28,7 @@
     <tbody>
     {% for p in page.items %}
       <tr>
-        <td><span class="cell-product">{{ garment(p.kind, p.color_key, "xs") }}<span class="strong">{{ p.name }}</span></span></td>
+        <td><span class="cell-product">{{ product_visual(p, "xs") }}<span class="strong">{{ p.name }}</span></span></td>
         <td class="mono muted">{{ p.product_id }}</td>
         <td class="muted">{{ p.parent_category_name }} › {{ p.category_name }}</td>
         <td class="num">{{ p.price|money }}</td>

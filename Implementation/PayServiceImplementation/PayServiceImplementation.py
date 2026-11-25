@@ -169,7 +169,8 @@ class PayServiceImplementation(PayServiceInterface):
             p = store.products.get(i["product_id"], {})
             items.append(OrderItemDTO(i["item_id"], i["product_id"], p.get("name", "Product removed"),
                                       i["quantity"], i["unit_price"], i.get("size") or "", i.get("color") or "",
-                                      p.get("color_key", "gray"), p.get("kind", "tshirt")))
+                                      p.get("color_key", "gray"), p.get("kind", "tshirt"),
+                                      p.get("image_url", "")))
         history = [StatusChangeDTO(h["history_id"], h["old_status"], h["new_status"], h["changed_at"])
                    for h in full["history"]]
         pay, ship, inv = full["payment"], full["shipping"], full["invoice"]

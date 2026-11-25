@@ -35,3 +35,15 @@ class SellerServiceInterface(ABC):
     @abstractmethod
     def leaf_categories(self):
         """[(category_id, 'Parent › Child')] that products can use."""
+
+    @abstractmethod
+    def prepare_photo(self, raw):
+        """Untrusted upload bytes -> (clean JPEG bytes, content_type). Raises ValidationError."""
+
+    @abstractmethod
+    def set_photo(self, seller_id, product_id, data, content_type):
+        """Store the photo of an OWN product (output of prepare_photo). Returns its URL."""
+
+    @abstractmethod
+    def remove_photo(self, seller_id, product_id):
+        """Delete the photo of an OWN product (back to the SVG silhouette)."""

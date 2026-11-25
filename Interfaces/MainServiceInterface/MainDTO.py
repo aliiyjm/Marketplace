@@ -66,6 +66,7 @@ class ProductDTO:
     review_count: int
     threshold_limit: int
     created_at: str
+    image_url: str = ""      # photo in S3 (or /media/ in memory mode); "" = SVG silhouette
 
     @property
     def in_stock(self):

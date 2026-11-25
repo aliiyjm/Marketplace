@@ -1,5 +1,7 @@
-Flask>=3.0,<4
+Flask>=3.1,<4
 requests>=2.32,<3
+# product photos: validated and re-encoded (metadata removed) before upload
+Pillow>=11.0,<13
 # database drivers (only needed when FINANCE_BACKEND=mysql / OPERATIONS_BACKEND=postgres)
 PyMySQL>=1.1,<2
 psycopg[binary]>=3.1,<4

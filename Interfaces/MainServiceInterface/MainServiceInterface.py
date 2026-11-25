@@ -34,3 +34,7 @@ class MainServiceInterface(ABC):
     @abstractmethod
     def add_review(self, user_id, product_id, form):
         """Store a ReviewForm. Raises ValidationError when not allowed."""
+
+    @abstractmethod
+    def product_photo(self, key):
+        """(content_type, bytes) of a photo the app serves itself (memory mode), or None."""

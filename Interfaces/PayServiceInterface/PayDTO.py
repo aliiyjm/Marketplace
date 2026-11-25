@@ -111,6 +111,7 @@ class OrderItemDTO:
     color: str
     color_key: str
     kind: str
+    image_url: str = ""
 
     @property
     def subtotal(self):

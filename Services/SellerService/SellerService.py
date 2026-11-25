@@ -1,8 +1,9 @@
-"""SellerService: seller center (dashboard, products, stock alerts)."""
+"""SellerService: seller center (dashboard, products, stock alerts, photos)."""
 import json
 
+from Interfaces.ProductServiceInterface.ProductDTO import MAX_UPLOAD_BYTES
 from Interfaces.SellerServiceInterface.SellerDTO import ProductForm
-from Interfaces.Validators import clean_text, parse_int
+from Interfaces.Validators import ValidationError, clean_text, parse_int
 
 
 class SellerService:
@@ -35,6 +36,25 @@ class SellerService:
 
     def categories(self):
         return self.impl.leaf_categories()
+
+    # ---------- photos ----------
+    def read_photo(self, upload):
+        """Uploaded file (werkzeug FileStorage) -> (clean bytes, content_type), or None
+        when no file was chosen. Call it BEFORE saving the product, so a bad file
+        stops the whole form instead of leaving a product without its photo."""
+        if upload is None or not getattr(upload, "filename", ""):
+            return None
+        raw = upload.read(MAX_UPLOAD_BYTES + 1)       # never read more than the limit
+        if len(raw) > MAX_UPLOAD_BYTES:
+            raise ValidationError("The photo must be 5 MB or less.")
+        return self.impl.prepare_photo(raw)
+
+    def set_photo(self, seller_id, product_id, photo):
+        data, content_type = photo
+        return self.impl.set_photo(seller_id, product_id, data, content_type)
+
+    def remove_photo(self, seller_id, product_id):
+        self.impl.remove_photo(seller_id, product_id)
 
     def dynamo_json(self, product):
         return json.dumps(self.impl.dynamo_preview(product), indent=2, ensure_ascii=False, default=str)

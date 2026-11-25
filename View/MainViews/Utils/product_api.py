@@ -4,6 +4,7 @@ Configuration (environment variables):
     PRODUCTS_API_URL      API Gateway invoke URL (defaults to API_URL of api_client.py)
     MARKETPLACE_API_KEY   same value as the Lambda's MARKETPLACE_API_KEY; needed for writes
 """
+import base64
 import logging
 import os
 
@@ -18,6 +19,8 @@ ROUTE_UPDATE = "/productos/modificar"
 ROUTE_DELETE = "/productos/eliminar"
 ROUTE_STOCK = "/productos/stock"
 ROUTE_LOAD = "/productos/cargar"
+ROUTE_IMAGE = "/productos/imagen"
+IMAGE_TIMEOUT = 30   # same as the Lambda timeout: S3 upload + DynamoDB write
 
 
 class ProductApiError(Exception):
@@ -42,12 +45,12 @@ class ProductApiClient:
         self.api_key = api_key if api_key is not None else os.environ.get("MARKETPLACE_API_KEY", "")
         self.http = http or requests            # injectable for tests
 
-    def _call(self, method, route, *, write=False, **kwargs):
+    def _call(self, method, route, *, write=False, timeout=TIMEOUT, **kwargs):
         # The key goes on every call: writes need it, and reads with it also
         # return drafts (seller center). Without it the Lambda only shows active items.
         headers = {"x-api-key": self.api_key} if self.api_key else {}
         try:
-            resp = self.http.request(method, self.base_url + route, headers=headers, timeout=TIMEOUT, **kwargs)
+            resp = self.http.request(method, self.base_url + route, headers=headers, timeout=timeout, **kwargs)
         except requests.RequestException:
             raise ProductApiError("Could not connect to the product database.") from None
         try:
@@ -105,3 +108,12 @@ class ProductApiClient:
 
     def load(self, payloads):
         return self._call("POST", ROUTE_LOAD, write=True, json={"items": payloads})["written"]
+
+    def upload_image(self, product_id, data, content_type):
+        """Send an already re-encoded photo; the Lambda stores it in S3. Returns its URL."""
+        body = {"product_id": product_id, "content_type": content_type,
+                "data": base64.b64encode(data).decode("ascii")}
+        return self._call("POST", ROUTE_IMAGE, write=True, timeout=IMAGE_TIMEOUT, json=body)["image_url"]
+
+    def delete_image(self, product_id):
+        return self._call("DELETE", ROUTE_IMAGE, write=True, timeout=IMAGE_TIMEOUT, params={"product_id": product_id})

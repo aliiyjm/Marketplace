@@ -37,17 +37,35 @@ def _form_echo():
     return data
 
 
+def _save_photo(product_id, photo):
+    """Upload or remove the photo AFTER the product data was saved. A failure here
+    does not undo the product: the seller sees a warning and can retry."""
+    svc = services().seller
+    try:
+        if photo:
+            svc.set_photo(g.user.seller_id, product_id, photo)
+        elif request.form.get("remove_photo") == "1":
+            svc.remove_photo(g.user.seller_id, product_id)
+        return True
+    except ValidationError as e:
+        flash(f"The product was saved, but the photo was not: {e}", "error")
+        return False
+
+
 @bp.route("/products/new", methods=["GET", "POST"])
 @seller_required
 def new_product():
     if request.method == "POST":
         try:
+            photo = services().seller.read_photo(request.files.get("photo"))   # checked first
             pid = services().seller.create(g.user.seller_id, request.form)
-            flash(f"Product {pid} created.", "ok")
-            return redirect(url_for("seller.products"))
         except ValidationError as e:
             flash_errors(e)
             return _form_page(form=_form_echo(), status=400)
+        if _save_photo(pid, photo):
+            flash(f"Product {pid} created.", "ok")
+            return redirect(url_for("seller.products"))
+        return redirect(url_for("seller.edit_product", product_id=pid))
     return _form_page(form={"visible": "1", "threshold_limit": "5", "attrs": [("Material", ""), ("Fit", "")]})
 
 
@@ -60,12 +78,14 @@ def edit_product(product_id):
         abort(404)
     if request.method == "POST":
         try:
+            photo = svc.read_photo(request.files.get("photo"))               # checked first
             svc.update(g.user.seller_id, product_id, request.form)
-            flash("Changes saved.", "ok")
-            return redirect(url_for("seller.edit_product", product_id=product_id))
         except ValidationError as e:
             flash_errors(e)
             return _form_page(product, _form_echo(), 400)
+        if _save_photo(product_id, photo):
+            flash("Changes saved.", "ok")
+        return redirect(url_for("seller.edit_product", product_id=product_id))
     form = {"name": product.name, "description": product.description, "category_id": str(product.category_id),
             "price": f"{product.price:.2f}", "stock": str(product.stock),
             "threshold_limit": str(product.threshold_limit), "sizes": ", ".join(product.sizes),

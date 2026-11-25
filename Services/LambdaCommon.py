@@ -4,6 +4,7 @@ Environment variables of the Lambda:
     MARKETPLACE_TABLE    DynamoDB table (default MarketplaceDB)
     MARKETPLACE_GSI      global secondary index (default GSI1)
     MARKETPLACE_API_KEY  secret shared with the Flask app (header x-api-key)
+    MARKETPLACE_BUCKET   S3 bucket for product photos (optional: without it photos are disabled)
 """
 import base64
 import hmac
@@ -50,8 +51,8 @@ def parse_request(event):
     return method, path.rstrip("/"), headers, query, body
 
 
-def json_body(body):
-    if len(body) > MAX_BODY:
+def json_body(body, max_size=MAX_BODY):
+    if len(body) > max_size:
         raise ValidationError("Body too large.")
     try:
         data = json.loads(body or "{}")

@@ -67,6 +67,7 @@ python -m pytest -q
 | `API_URL` | see api_client.py | API Gateway invoke URL (users). |
 | `PRODUCTS_API_URL` | `API_URL` | API Gateway invoke URL for `/productos/...`. |
 | `MARKETPLACE_API_KEY` | — | Same value as the Lambda's `MARKETPLACE_API_KEY` (users routes and product writes). Never commit it. |
+| `PRODUCT_IMAGES_URL` | — | `https://<bucket>.s3.<region>.amazonaws.com`: the only external origin allowed for images (CSP). See `docs/FOTOS_S3.md`. |
 | `PRODUCT_COUNT` | `17000` | Size of the generated catalog. |
 | `SECRET_KEY` | random | Set it so sessions survive restarts. |
 | `SESSION_COOKIE_SECURE` | off | Set `1` when served over HTTPS. |

@@ -47,6 +47,7 @@ partir de las capas del proyecto con `python scripts/build_single_file_lambda.py
    | `MARKETPLACE_TABLE` | `MarketplaceDB` |
    | `MARKETPLACE_GSI` | `GSI1` |
    | `MARKETPLACE_API_KEY` | una clave larga y secreta: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+   | `MARKETPLACE_BUCKET` | (opcional) bucket de S3 para las fotos de producto; ver [FOTOS_S3.md](FOTOS_S3.md) |
 
    La clave protege **todas** las rutas de usuarios y las que escriben productos. **No la subas
    a GitHub.** Si se filtra, cámbiala en la Lambda y en tu PC.
@@ -86,6 +87,8 @@ Todas apuntan a la misma Lambda. Las de usuarios ya las tienes; agrega las de pr
 | DELETE | `/productos/eliminar` (`?product_id=`) | sí |
 | POST | `/productos/stock` | sí |
 | POST | `/productos/cargar` | sí |
+| POST | `/productos/imagen` (foto a S3, ver [FOTOS_S3.md](FOTOS_S3.md)) | sí |
+| DELETE | `/productos/imagen` (`?product_id=`) | sí |
 | GET | `/carrito/consultar` (`?id_user=`) | sí |
 | PUT | `/carrito/guardar` | sí |
 | DELETE | `/carrito/vaciar` (`?id_user=`) | sí |

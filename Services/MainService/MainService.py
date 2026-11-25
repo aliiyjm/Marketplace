@@ -42,3 +42,7 @@ class MainService:
 
     def add_review(self, user_id, product_id, form_data):
         return self.impl.add_review(user_id, product_id, ReviewForm.from_form(form_data))
+
+    def product_photo(self, product_id, name):
+        """Photo stored in memory (local mode). With AWS the photos come from S3."""
+        return self.impl.product_photo(f"products/{product_id}/{name}")

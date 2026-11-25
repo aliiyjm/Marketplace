@@ -159,3 +159,6 @@ class MainServiceImplementation(MainServiceInterface):
             raise ValidationError("You already reviewed this product.") from None
         refresh_rating(self.store, product_id)
         return review_id
+
+    def product_photo(self, key):
+        return self.store.product_repo.read_image(key)

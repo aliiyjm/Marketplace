@@ -35,3 +35,14 @@
   </svg>
 </div>
 {%- endmacro %}
+
+{# Product photo when the seller uploaded one, otherwise the SVG silhouette.
+   image_url was validated when saved (only this app's S3 bucket or /media/),
+   and Jinja escapes it, so it cannot inject HTML or a javascript: link.
+   `obj` can be a product, a cart line product or an order item. #}
+{% macro product_visual(obj, size="md", alt="") -%}
+{% if obj.image_url %}
+<img class="photo photo--{{ size }}" src="{{ obj.image_url }}" alt="{{ alt }}" loading="lazy" decoding="async"
+     width="1200" height="1200" referrerpolicy="no-referrer">
+{%- else %}{{ garment(obj.kind, obj.color_key, size) }}{% endif %}
+{%- endmacro %}

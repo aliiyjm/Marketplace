@@ -11,44 +11,88 @@ Routes:
     DELETE /productos/eliminar    ?product_id=PRD-000001          soft delete
     POST   /productos/stock       body: {product_id, delta}       atomic stock change
     POST   /productos/cargar      body: {items: [...]} (max 100)  initial bulk load
+    POST   /productos/imagen      body: {product_id, content_type, data (base64)}  set photo (S3)
+    DELETE /productos/imagen      ?product_id=PRD-000001         remove photo
 
 Security: every route that WRITES requires the header `x-api-key` equal to the
 Lambda variable MARKETPLACE_API_KEY (constant-time compare). If it is not
 configured, writes are refused (fail closed). Reads without the key only see
 ACTIVE products (drafts and deleted ones stay private). Every payload is
 validated with ProductItem before it reaches DynamoDB, and errors never expose
-internal details.
+internal details. Photos are checked again here (defense in depth): strict
+base64, at most MAX_IMAGE_BYTES, and the real file type (magic bytes) must be
+JPEG/PNG/WebP and match the declared one.
 """
+import base64
+import binascii
+import os
+
+from Implementation.ProductServiceImplementation.ProductImageStore import S3ImageStore
 from Implementation.ProductServiceImplementation.ProductServiceImplementation import \
     ProductServiceImplementation
-from Interfaces.ProductServiceInterface.ProductDTO import ProductItem
-from Interfaces.ProductServiceInterface.ProductServiceInterface import (OutOfStock, ProductExists,
-                                                                        ProductNotFound)
+from Interfaces.ProductServiceInterface.ProductDTO import (IMAGE_TYPES, MAX_IMAGE_BYTES, ProductItem,
+                                                           image_type)
+from Interfaces.ProductServiceInterface.ProductServiceInterface import (ImagesDisabled, OutOfStock,
+                                                                        ProductExists, ProductNotFound)
 from Interfaces.Validators import PRODUCT_ID_RE, SLUG_RE, ValidationError, parse_int
 from Services.LambdaCommon import (api_key_configured, authorized, get_table, gsi_name,
                                    json_body, log, parse_request, response)
 
 MAX_BATCH = 100
+MAX_IMAGE_BODY = MAX_IMAGE_BYTES * 4 // 3 + 4096      # base64 makes the file ~33% bigger
 PRODUCT_QUERY = "/productos/consultar"
 PRODUCT_ADD = "/productos/agregar"
 PRODUCT_UPDATE = "/productos/modificar"
 PRODUCT_DELETE = "/productos/eliminar"
 PRODUCT_STOCK = "/productos/stock"
 PRODUCT_LOAD = "/productos/cargar"
+PRODUCT_IMAGE = "/productos/imagen"
 PRODUCT_ROUTES = {
     (PRODUCT_QUERY, "GET"), (PRODUCT_ADD, "POST"), (PRODUCT_UPDATE, "PUT"),
     (PRODUCT_DELETE, "DELETE"), (PRODUCT_STOCK, "POST"), (PRODUCT_LOAD, "POST"),
+    (PRODUCT_IMAGE, "POST"), (PRODUCT_IMAGE, "DELETE"),
 }
-PRODUCT_WRITE_ROUTES = {PRODUCT_ADD, PRODUCT_UPDATE, PRODUCT_DELETE, PRODUCT_STOCK, PRODUCT_LOAD}
+PRODUCT_WRITE_ROUTES = {PRODUCT_ADD, PRODUCT_UPDATE, PRODUCT_DELETE, PRODUCT_STOCK, PRODUCT_LOAD, PRODUCT_IMAGE}
 
 _product_service = None
+
+
+def default_image_store():
+    """S3 bucket from MARKETPLACE_BUCKET (AWS_REGION is set by Lambda itself), or None."""
+    bucket = os.environ.get("MARKETPLACE_BUCKET", "").strip()
+    if not bucket:
+        return None
+    try:
+        return S3ImageStore(bucket, os.environ.get("AWS_REGION", "us-east-1"))
+    except ValueError as e:
+        log.error("Photos disabled: %s", e)
+        return None
 
 
 def default_product_service():
     global _product_service
     if _product_service is None:
-        _product_service = ProductServiceImplementation(get_table(), gsi_name())
+        _product_service = ProductServiceImplementation(get_table(), gsi_name(), images=default_image_store())
     return _product_service
+
+
+def _photo(data):
+    """Decode and check an uploaded photo: (bytes, content_type)."""
+    content_type = data.get("content_type")
+    if content_type not in IMAGE_TYPES:
+        raise ValidationError("content_type must be image/jpeg, image/png or image/webp.")
+    raw = data.get("data")
+    if not isinstance(raw, str) or not raw or len(raw) > MAX_IMAGE_BODY:
+        raise ValidationError(f"data must be the photo in base64 (at most {MAX_IMAGE_BYTES // 1000} KB).")
+    try:
+        content = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValidationError("data is not valid base64.") from None
+    if len(content) > MAX_IMAGE_BYTES:
+        raise ValidationError(f"The photo is larger than {MAX_IMAGE_BYTES // 1000} KB.")
+    if image_type(content) != content_type:
+        raise ValidationError("The file is not the image type it claims to be.")
+    return content, content_type
 
 
 def _product_id(value):
@@ -93,6 +137,17 @@ def handle_productos(event, context=None, service=None):
             svc.soft_delete(_product_id(query.get("product_id")))
             return response(200, {"deleted": query.get("product_id")})
 
+        if route == PRODUCT_IMAGE:
+            if method == "DELETE":
+                product_id = _product_id(query.get("product_id"))
+                svc.remove_image(product_id)
+                return response(200, {"product_id": product_id, "image_url": ""})
+            data = json_body(body, max_size=MAX_IMAGE_BODY)
+            product_id = _product_id(data.get("product_id"))
+            content, content_type = _photo(data)
+            url = svc.set_image(product_id, content, content_type)
+            return response(200, {"product_id": product_id, "image_url": url})
+
         data = json_body(body)
         if route == PRODUCT_ADD:
             item = ProductItem.from_payload(data)
@@ -125,6 +180,8 @@ def handle_productos(event, context=None, service=None):
         return response(409, {"error": str(e), "code": "EXISTS"})
     except ProductNotFound as e:
         return response(404, {"error": str(e), "code": "NOT_FOUND"})
+    except ImagesDisabled as e:
+        return response(503, {"error": str(e), "code": "IMAGES_DISABLED"})
     except ValidationError as e:
         return response(400, {"error": "; ".join(e.errors[:10])})
     except Exception:  # never leak internals to the caller; details go to CloudWatch

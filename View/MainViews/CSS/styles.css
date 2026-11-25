@@ -268,6 +268,14 @@ legend { padding: 0; }
 .gallery { flex: 1 1 400px; display: flex; flex-direction: column; gap: 12px; }
 .gallery__thumbs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .gallery__thumbs .garment { width: 100%; height: auto; }
+
+/* ---------- product photos (same boxes as the garment placeholder) ---------- */
+.photo { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1; object-fit: cover; background: var(--bg-tint, #eef1f4); }
+.photo--xs { width: 44px; height: 44px; border-radius: 8px; flex: none; }
+.photo--sm { width: 96px; height: 96px; border-radius: 10px; flex: none; }
+.photo--xl { border-radius: var(--radius); }
+.photo-field { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.photo-field > .stack-sm { flex: 1 1 240px; }
 .pinfo { flex: 1 1 400px; display: flex; flex-direction: column; gap: 16px; }
 .pinfo__title { font: 700 34px/1.15 var(--display); }
 .pinfo__rating { display: flex; align-items: center; gap: 12px; font-size: 15px; }

@@ -1,6 +1,6 @@
 {% extends "layout_panel.html" if admin else "layout_shop.html" %}
 {% import "icons.html" as ic %}
-{% from "partials/garment.html" import garment %}
+{% from "partials/garment.html" import garment, product_visual %}
 {% from "partials/status.html" import status_badge %}
 {% block title %}Order {{ order.code }}{% endblock %}
 {% block content %}
@@ -24,7 +24,7 @@
         <tbody>
         {% for i in order.items %}
           <tr>
-            <td><span class="cell-product">{{ garment(i.kind, i.color_key, "xs") }}<a href="{{ url_for('shop.product', product_id=i.product_id) }}">{{ i.name }}</a></span></td>
+            <td><span class="cell-product">{{ product_visual(i, "xs") }}<a href="{{ url_for('shop.product', product_id=i.product_id) }}">{{ i.name }}</a></span></td>
             <td class="muted">Size {{ i.size }} · {{ i.color }}</td>
             <td class="num">{{ i.quantity }}</td>
             <td class="num">{{ i.unit_price|money }}</td>

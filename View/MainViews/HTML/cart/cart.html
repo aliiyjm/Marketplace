@@ -1,6 +1,6 @@
 {% extends "layout_shop.html" %}
 {% import "icons.html" as ic %}
-{% from "partials/garment.html" import garment %}
+{% from "partials/garment.html" import garment, product_visual %}
 {% block title %}Your cart{% endblock %}
 {% block content %}
 <h1 class="h-page">Your cart <span class="muted h-sub">({{ cart.count }} item{{ 's' if cart.count != 1 }})</span></h1>
@@ -17,7 +17,7 @@
     {% for line in cart.lines %}
     {% set p = line.product %}
     <article class="cart-line">
-      <a href="{{ url_for('shop.product', product_id=p.product_id) }}" class="cart-line__media" tabindex="-1" aria-hidden="true">{{ garment(p.kind, p.color_key, "sm") }}</a>
+      <a href="{{ url_for('shop.product', product_id=p.product_id) }}" class="cart-line__media" tabindex="-1" aria-hidden="true">{{ product_visual(p, "sm") }}</a>
       <div class="cart-line__info">
         <a class="cart-line__name" href="{{ url_for('shop.product', product_id=p.product_id) }}">{{ p.name }}</a>
         <span class="muted small">Size {{ line.size }} · {{ line.color }}</span>

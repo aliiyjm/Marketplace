@@ -26,6 +26,30 @@ class ProductExists(ProductStoreError):
     """A product with that id already exists."""
 
 
+class ImagesDisabled(ProductStoreError):
+    """Photos are not configured (the Lambda has no MARKETPLACE_BUCKET)."""
+
+
+class ProductImageStoreInterface(ABC):
+    """Where photo files live (S3 bucket in AWS, a dict in the tests)."""
+
+    @abstractmethod
+    def put(self, key, data, content_type):
+        """Store the bytes under `key` (products/PRD-000123/<random>.jpg)."""
+
+    @abstractmethod
+    def delete(self, key):
+        """Remove the file (no error if it does not exist)."""
+
+    @abstractmethod
+    def url(self, key):
+        """Public URL of the file."""
+
+    @abstractmethod
+    def key_of(self, url):
+        """Key of a URL from THIS store, or None (never touches other buckets)."""
+
+
 class ProductServiceInterface(ABC):
     @abstractmethod
     def get(self, product_id):
@@ -56,6 +80,16 @@ class ProductServiceInterface(ABC):
     def batch_load(self, items):
         """Bulk insert/overwrite (initial load). Returns how many were written."""
 
+    @abstractmethod
+    def set_image(self, product_id, data, content_type):
+        """Store an already validated photo and save its URL in the product
+        (the previous photo is deleted). Returns the new URL.
+        Raises ProductNotFound / ImagesDisabled."""
+
+    @abstractmethod
+    def remove_image(self, product_id):
+        """Delete the photo of the product (back to the SVG silhouette)."""
+
 
 class ProductRepositoryInterface(ABC):
     """Persistence used by the Flask Implementation classes. The in-memory
@@ -80,3 +114,16 @@ class ProductRepositoryInterface(ABC):
     @abstractmethod
     def adjust_stock(self, product_id, delta):
         """Atomic stock change. Returns the new stock or raises OutOfStock."""
+
+    @abstractmethod
+    def set_image(self, product_id, data, content_type):
+        """Persist a photo (bytes already re-encoded and checked). Returns its URL."""
+
+    @abstractmethod
+    def remove_image(self, product_id):
+        """Delete the photo of the product."""
+
+    def read_image(self, key):
+        """(content_type, bytes) of a photo served by this app, or None.
+        Only the memory backend serves photos itself; S3 serves its own."""
+        return None

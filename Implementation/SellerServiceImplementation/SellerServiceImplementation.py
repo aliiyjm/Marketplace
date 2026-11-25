@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from Implementation.DataSource.Inventory import refresh_alert
 from Implementation.DataSource.Mappers import product_to_dto, search_text
+from Implementation.DataSource.ProductPhotos import prepare_photo
 from Interfaces.MainServiceInterface.MainDTO import color_key, valid_product_id
 from Interfaces.ProductServiceInterface.ProductServiceInterface import ProductExists
 from Interfaces.SellerServiceInterface.SellerDTO import (AlertDTO, DailyUnitsDTO,
@@ -182,11 +183,46 @@ class SellerServiceImplementation(SellerServiceInterface):
             # Favorites and carts that still point to it simply stop showing it
             # (both lists skip products that are not public).
 
+    # ---------- photos ----------
+    @staticmethod
+    def prepare_photo(raw):
+        return prepare_photo(raw)
+
+    def set_photo(self, seller_id, product_id, data, content_type):
+        """`data` must come from prepare_photo (re-encoded, metadata removed)."""
+        with self.store.lock:
+            if not self._own(seller_id, product_id):
+                raise ValidationError("Product not found.")
+        url = self.store.product_repo.set_image(product_id, data, content_type)   # database first
+        with self.store.lock:
+            record = self.store.products.get(product_id)
+            if record is not None:
+                self.store.products[product_id] = dict(record, image_url=url)
+        return url
+
+    def remove_photo(self, seller_id, product_id):
+        with self.store.lock:
+            record = self._own(seller_id, product_id)
+            if not record:
+                raise ValidationError("Product not found.")
+            if not record.get("image_url"):
+                return
+        self.store.product_repo.remove_image(product_id)
+        with self.store.lock:
+            record = self.store.products.get(product_id)
+            if record is not None:
+                updated = dict(record)
+                updated.pop("image_url", None)
+                self.store.products[product_id] = updated
+
     @staticmethod
     def dynamo_preview(product):
         """How the item looks in MarketplaceDB (shown in the product form)."""
-        return {"PK": f"PRODUCT#{product.product_id}", "SK": "METADATA",
-                "GSI1PK": f"CATEGORY#{product.category_slug}",
-                "GSI1SK": f"PRICE#{product.price:010.2f}", "seller_id": product.seller_id,
-                "sizes": list(product.sizes), "colors": list(product.colors),
-                "attributes": product.attributes}
+        preview = {"PK": f"PRODUCT#{product.product_id}", "SK": "METADATA",
+                   "GSI1PK": f"CATEGORY#{product.category_slug}",
+                   "GSI1SK": f"PRICE#{product.price:010.2f}", "seller_id": product.seller_id,
+                   "sizes": list(product.sizes), "colors": list(product.colors),
+                   "attributes": product.attributes}
+        if product.image_url:
+            preview["image_url"] = product.image_url
+        return preview

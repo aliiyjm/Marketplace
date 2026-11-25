@@ -7,8 +7,16 @@
   access immediately).
 - login_required / seller_required / admin_required decorators.
 - safe_next() blocks open redirects in ?next=.
+- Request size: 1 MB everywhere; only the seller product form accepts a photo
+  (UPLOAD_LIMIT), and only for signed-in users, so anonymous clients cannot
+  push big bodies.
+- Product photos: img-src only allows this site and the S3 bucket given in
+  PRODUCT_IMAGES_URL (https origin, nothing else).
 """
 import hmac
+import logging
+import os
+import re
 import secrets
 from functools import wraps
 from urllib.parse import urlsplit
@@ -16,9 +24,30 @@ from urllib.parse import urlsplit
 from flask import (abort, current_app, flash, g, redirect, request, session,
                    url_for)
 
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
-       "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; "
-       "base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+log = logging.getLogger("security")
+CSP_TEMPLATE = ("default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
+                "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:{images}; object-src 'none'; "
+                "base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+CSP = CSP_TEMPLATE.format(images="")
+IMAGES_ORIGIN_RE = re.compile(r"https://[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\.s3\.[a-z0-9-]+\.amazonaws\.com")
+UPLOAD_ENDPOINTS = {"seller.new_product", "seller.edit_product"}
+UPLOAD_LIMIT = 6 * 1024 * 1024        # 5 MB photo + the rest of the form
+
+
+def images_origin(value=None):
+    """PRODUCT_IMAGES_URL from .env -> 'https://<bucket>.s3.<region>.amazonaws.com', or ''.
+    Anything else (http, a path, another domain) is ignored with a warning."""
+    value = (os.environ.get("PRODUCT_IMAGES_URL", "") if value is None else value).strip().rstrip("/")
+    if not value:
+        return ""
+    if not IMAGES_ORIGIN_RE.fullmatch(value):
+        log.warning("PRODUCT_IMAGES_URL ignored: it must look like https://<bucket>.s3.<region>.amazonaws.com")
+        return ""
+    return value
+
+
+def build_csp(origin=""):
+    return CSP_TEMPLATE.format(images=f" {origin}" if origin else "")
 
 
 def services():
@@ -33,9 +62,12 @@ def csrf_token():
 
 def init_security(app):
     app.jinja_env.globals["csrf_token"] = csrf_token
+    csp = build_csp(images_origin(app.config.get("PRODUCT_IMAGES_URL")))   # None -> read .env
 
     @app.before_request
     def load_user_and_check_csrf():
+        if request.endpoint in UPLOAD_ENDPOINTS and request.method == "POST" and session.get("uid"):
+            request.max_content_length = UPLOAD_LIMIT     # must be set before the form is parsed
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             sent = request.form.get("csrf_token", "").encode()
             expected = session.get("csrf", "").encode()
@@ -54,7 +86,7 @@ def init_security(app):
         resp.headers["X-Frame-Options"] = "DENY"
         resp.headers["Referrer-Policy"] = "same-origin"
         resp.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        resp.headers["Content-Security-Policy"] = CSP
+        resp.headers["Content-Security-Policy"] = csp
         if g.get("user"):
             # Pages with personal data must not be stored by shared caches/browsers.
             resp.headers["Cache-Control"] = "no-store"

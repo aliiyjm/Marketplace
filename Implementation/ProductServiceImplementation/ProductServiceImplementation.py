@@ -5,16 +5,25 @@ This is the only layer that knows the table. It receives a boto3 Table object
 
 Stock is changed with a conditional UpdateItem: DynamoDB itself refuses to go
 below zero, so two buyers cannot get the last unit at the same time.
+
+Photos: the file goes to the image store (S3) first and only then its URL is
+written in the item; if that write fails the new file is deleted again, so the
+table never points to a missing photo.
 """
 import base64
 import binascii
 import json
+import logging
+import secrets
 
-from Interfaces.ProductServiceInterface.ProductDTO import PK_PREFIX, SK_PRODUCT, ProductItem
-from Interfaces.ProductServiceInterface.ProductServiceInterface import (OutOfStock, ProductExists,
-                                                                        ProductNotFound,
+from Interfaces.ProductServiceInterface.ProductDTO import (IMAGE_TYPES, PK_PREFIX, SK_PRODUCT,
+                                                           ProductItem, image_key)
+from Interfaces.ProductServiceInterface.ProductServiceInterface import (ImagesDisabled, OutOfStock,
+                                                                        ProductExists, ProductNotFound,
                                                                         ProductServiceInterface)
 from Interfaces.Validators import ValidationError
+
+image_log = logging.getLogger("product_images")
 
 MAX_PAGE = 2000
 MAX_STOCK_DELTA = 10000
@@ -47,9 +56,10 @@ def decode_cursor(cursor):
 
 
 class ProductServiceImplementation(ProductServiceInterface):
-    def __init__(self, table, index_name="GSI1"):
+    def __init__(self, table, index_name="GSI1", images=None):
         self.table = table
         self.index_name = index_name
+        self.images = images          # ProductImageStoreInterface (S3) or None = photos disabled
 
     @staticmethod
     def _key(product_id):
@@ -135,3 +145,57 @@ class ProductServiceImplementation(ProductServiceInterface):
             for item in items:
                 writer.put_item(Item=item.to_item())
         return len(items)
+
+    # ---------- photos ----------
+    def _store(self):
+        if self.images is None:
+            raise ImagesDisabled("Photos are disabled: MARKETPLACE_BUCKET is not configured in the Lambda.")
+        return self.images
+
+    def _delete_old(self, url):
+        """Best effort: a leftover file only costs storage, never breaks a page."""
+        key = self.images.key_of(url) if url else None
+        if key:
+            try:
+                self.images.delete(key)
+            except Exception:
+                image_log.exception("Could not delete the old photo %s", key)
+
+    def set_image(self, product_id, data, content_type):
+        store = self._store()
+        if content_type not in IMAGE_TYPES:
+            raise ValidationError("Unsupported photo type.")
+        current = self.get(product_id)
+        if current is None:
+            raise ProductNotFound(f"Product {product_id} does not exist.")
+        key = image_key(product_id, secrets.token_hex(16), content_type)
+        store.put(key, data, content_type)
+        url = store.url(key)
+        try:
+            self.table.update_item(Key=self._key(product_id), UpdateExpression="SET image_url = :u",
+                                   ConditionExpression="attribute_exists(PK)",
+                                   ExpressionAttributeValues={":u": url})
+        except Exception as e:
+            store.delete(key)                       # do not leave an orphan file
+            if is_conditional_failure(e):
+                raise ProductNotFound(f"Product {product_id} does not exist.") from None
+            raise
+        if current.image_url != url:
+            self._delete_old(current.image_url)
+        return url
+
+    def remove_image(self, product_id):
+        self._store()
+        current = self.get(product_id)
+        if current is None:
+            raise ProductNotFound(f"Product {product_id} does not exist.")
+        if not current.image_url:
+            return
+        try:
+            self.table.update_item(Key=self._key(product_id), UpdateExpression="REMOVE image_url",
+                                   ConditionExpression="attribute_exists(PK)")
+        except Exception as e:
+            if is_conditional_failure(e):
+                raise ProductNotFound(f"Product {product_id} does not exist.") from None
+            raise
+        self._delete_old(current.image_url)

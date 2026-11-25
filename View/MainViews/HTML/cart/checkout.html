@@ -1,6 +1,6 @@
 {% extends "layout_shop.html" %}
 {% import "icons.html" as ic %}
-{% from "partials/garment.html" import garment %}
+{% from "partials/garment.html" import garment, product_visual %}
 {% block title %}Checkout{% endblock %}
 {% block content %}
 {% set selected = form.get('method') or 'card' %}
@@ -71,7 +71,7 @@
     <h2 id="sum-h" class="h-card">Order summary</h2>
     <ul class="mini-lines">
       {% for line in cart.lines %}
-        <li>{{ garment(line.product.kind, line.product.color_key, "xs") }}
+        <li>{{ product_visual(line.product, "xs") }}
           <span class="mini-lines__name">{{ line.product.name }}<span class="muted small">Size {{ line.size }} · {{ line.color }} · × {{ line.qty }}</span></span>
           <strong>{{ line.line_total|money }}</strong></li>
       {% endfor %}

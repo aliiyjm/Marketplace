@@ -17,7 +17,8 @@ sys.path.insert(0, str(ROOT))
 os.environ["MARKETPLACE_ENV_FILE"] = "none"          # do not read the real .env
 for _name in list(os.environ):
     if _name.endswith("_BACKEND") or _name.startswith(("MYSQL_", "PG_")) or _name in (
-            "API_URL", "PRODUCTS_API_URL", "MARKETPLACE_API_KEY", "PRODUCT_COUNT", "SECRET_KEY"):
+            "API_URL", "PRODUCTS_API_URL", "MARKETPLACE_API_KEY", "PRODUCT_COUNT", "SECRET_KEY",
+            "PRODUCT_IMAGES_URL", "MARKETPLACE_BUCKET"):
         del os.environ[_name]
 
 from Services.ServiceContainer import build_services  # noqa: E402

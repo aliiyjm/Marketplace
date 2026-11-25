@@ -6,22 +6,27 @@ so a failed write never leaves the page showing data that is not in the database
 - ApiProductRepository:    API Gateway -> products Lambda -> DynamoDB MarketplaceDB.
 """
 import logging
+import secrets
 
 from Implementation.DataSource.Inventory import refresh_alert
 from Implementation.DataSource.Mappers import apply_ratings, search_text
-from Interfaces.ProductServiceInterface.ProductDTO import ProductItem
-from Interfaces.ProductServiceInterface.ProductServiceInterface import (OutOfStock, ProductExists,
-                                                                        ProductNotFound,
+from Interfaces.ProductServiceInterface.ProductDTO import IMAGE_KEY_RE, ProductItem, image_key
+from Interfaces.ProductServiceInterface.ProductServiceInterface import (ImagesDisabled, OutOfStock,
+                                                                        ProductExists, ProductNotFound,
                                                                         ProductRepositoryInterface,
                                                                         ProductStoreError)
 from Interfaces.Validators import ValidationError
 
 log = logging.getLogger("products")
+MEDIA_PREFIX = "/media/"
 
 
 class MemoryProductRepository(ProductRepositoryInterface):
+    """Photos are kept in memory and served by the app at /media/<key>."""
+
     def __init__(self, store):
         self.store = store
+        self.images = {}              # key -> (content_type, bytes)
 
     def load_all(self):
         return list(self.store.products.values())
@@ -44,6 +49,27 @@ class MemoryProductRepository(ProductRepositoryInterface):
             raise OutOfStock(f"Only {p['stock']} left of {p['name']}.")
         return p["stock"] + delta
 
+    def set_image(self, product_id, data, content_type):
+        if product_id not in self.store.products:
+            raise ProductNotFound("Product not found.")
+        key = image_key(product_id, secrets.token_hex(16), content_type)
+        self.images[key] = (content_type, bytes(data))
+        self._forget(self.store.products[product_id].get("image_url"))
+        return MEDIA_PREFIX + key
+
+    def remove_image(self, product_id):
+        p = self.store.products.get(product_id)
+        if p is None:
+            raise ProductNotFound("Product not found.")
+        self._forget(p.get("image_url"))
+
+    def _forget(self, url):
+        if url and url.startswith(MEDIA_PREFIX):
+            self.images.pop(url[len(MEDIA_PREFIX):], None)
+
+    def read_image(self, key):
+        return self.images.get(key) if IMAGE_KEY_RE.fullmatch(key or "") else None
+
 
 class ApiProductRepository(ProductRepositoryInterface):
     def __init__(self, client, store):
@@ -65,6 +91,8 @@ class ApiProductRepository(ProductRepositoryInterface):
             return ProductNotFound(message)
         if code == "EXISTS":
             return ProductExists(message)
+        if code == "IMAGES_DISABLED":
+            return ImagesDisabled("Photos are not enabled yet: set MARKETPLACE_BUCKET in the Lambda.")
         return ProductStoreError(message if getattr(error, "status", None) == 400 else default)
 
     def load_all(self):
@@ -102,6 +130,18 @@ class ApiProductRepository(ProductRepositoryInterface):
             return int(self.client.adjust_stock(product_id, delta))
         except self.client.Error as e:
             raise self._translate(e, "Could not update the stock. Try again.") from None
+
+    def set_image(self, product_id, data, content_type):
+        try:
+            return self.client.upload_image(product_id, data, content_type)
+        except self.client.Error as e:
+            raise self._translate(e, "Could not upload the photo. Try again.") from None
+
+    def remove_image(self, product_id):
+        try:
+            self.client.delete_image(product_id)
+        except self.client.Error as e:
+            raise self._translate(e, "Could not remove the photo. Try again.") from None
 
 
 def sync_catalog(store, repo):

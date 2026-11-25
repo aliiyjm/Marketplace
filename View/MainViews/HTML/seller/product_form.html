@@ -1,5 +1,6 @@
 {% extends "layout_panel.html" %}
 {% import "icons.html" as ic %}
+{% from "partials/garment.html" import product_visual %}
 {% block title %}{{ 'Edit product' if product else 'Add product' }}{% endblock %}
 {% block content %}
 <a class="back-link" href="{{ url_for('seller.products') }}">← Back to my products</a>
@@ -8,7 +9,7 @@
   {% if product %}<span class="mono muted">{{ product.product_id }}</span>{% endif %}
 </div>
 
-<form method="post" class="two-col js-product-form">
+<form method="post" enctype="multipart/form-data" class="two-col js-product-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="two-col__main stack-lg">
     <section class="card stack">
@@ -27,6 +28,23 @@
           {% endfor %}
         </select>
       </label>
+    </section>
+
+    <section class="card stack" aria-labelledby="photo-h">
+      <h2 id="photo-h" class="h-card">Photo</h2>
+      <div class="photo-field">
+        {% if product %}{{ product_visual(product, "sm") }}{% endif %}
+        <div class="stack-sm">
+          <label class="field">{{ 'Replace the photo' if product and product.image_url else 'Upload a photo' }}
+            <input class="input" type="file" name="photo" accept="image/jpeg,image/png,image/webp">
+          </label>
+          <span class="hint">JPG, PNG or WebP, up to 5 MB. It is resized to 1200 px and its location data (EXIF) is removed.
+            Without a photo the catalog shows a drawing in the first color.</span>
+          {% if product and product.image_url %}
+            <label class="check"><input type="checkbox" name="remove_photo" value="1">Remove the photo</label>
+          {% endif %}
+        </div>
+      </div>
     </section>
 
     <section class="card stack">

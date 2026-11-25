@@ -68,10 +68,10 @@ class FakeTable:
         self.items[key] = _as_dynamo(copy.deepcopy(Item))
         self.writes += 1
 
-    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, ConditionExpression=None,
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues=None, ConditionExpression=None,
                     ExpressionAttributeNames=None, ReturnValues=None):
         item = self.items.get((Key["PK"], Key["SK"]))
-        values = ExpressionAttributeValues
+        values = ExpressionAttributeValues or {}
         if item is None:
             raise ConditionalCheckFailed()
         if ConditionExpression and ":need" in ConditionExpression and item["stock"] < values[":need"]:
@@ -81,6 +81,12 @@ class FakeTable:
             return {"Attributes": {"stock": Decimal(item["stock"])}}
         if UpdateExpression == "SET #s = :d":
             item[ExpressionAttributeNames["#s"]] = values[":d"]
+            return {}
+        if UpdateExpression == "SET image_url = :u":
+            item["image_url"] = values[":u"]
+            return {}
+        if UpdateExpression == "REMOVE image_url":
+            item.pop("image_url", None)
             return {}
         raise NotImplementedError(UpdateExpression)
 
@@ -179,3 +185,20 @@ class RouterHttp:
 
 def _json_dumps(data):
     return json.dumps(data)
+
+
+class FakeS3Client:
+    """The few boto3 S3 client calls the photo store uses."""
+
+    def __init__(self, fail_put=False):
+        self.objects = {}           # (bucket, key) -> {"Body", "ContentType", "CacheControl"}
+        self.fail_put = fail_put
+
+    def put_object(self, Bucket, Key, Body, ContentType, CacheControl):
+        if self.fail_put:
+            raise RuntimeError("S3 is down")
+        self.objects[(Bucket, Key)] = {"Body": bytes(Body), "ContentType": ContentType,
+                                       "CacheControl": CacheControl}
+
+    def delete_object(self, Bucket, Key):
+        self.objects.pop((Bucket, Key), None)

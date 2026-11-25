@@ -1,6 +1,6 @@
 {% extends "layout_shop.html" %}
 {% import "icons.html" as ic %}
-{% from "partials/garment.html" import garment %}
+{% from "partials/garment.html" import garment, product_visual %}
 {% from "partials/product_card.html" import product_card, fav_button, stars %}
 {% block title %}{{ p.name }}{% endblock %}
 {% block content %}
@@ -13,10 +13,12 @@
 
 <section class="card product-hero">
   <div class="gallery">
-    {{ garment(p.kind, p.color_key, "xl") }}
+    {{ product_visual(p, "xl", alt=p.name) }}
+    {% if not p.image_url %}
     <div class="gallery__thumbs" aria-hidden="true">
       {% for name, key in p.swatches[:4] %}{{ garment(p.kind, key, "sm") }}{% endfor %}
     </div>
+    {% endif %}
   </div>
 
   <div class="pinfo">

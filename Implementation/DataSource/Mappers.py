@@ -20,6 +20,7 @@ def product_to_dto(store, p):
         attributes=dict(p.get("attributes", {})),
         rating=p.get("rating"), review_count=p.get("review_count", 0),
         threshold_limit=p.get("threshold_limit", 0), created_at=p.get("created_at", ""),
+        image_url=p.get("image_url", ""),
     )
 
 

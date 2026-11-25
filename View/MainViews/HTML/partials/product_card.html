@@ -1,5 +1,5 @@
 {% import "icons.html" as ic %}
-{% from "partials/garment.html" import garment %}
+{% from "partials/garment.html" import garment, product_visual %}
 {% macro stars(rating, count) -%}
   {% if count %}
     <span class="rating">{{ ic.star() }}<strong>{{ "%.1f"|format(rating) }}</strong><span class="muted">({{ count }})</span></span>
@@ -22,7 +22,7 @@
 {% macro product_card(p, is_fav=False, next_url="/") -%}
 <article class="pcard">
   <div class="pcard__media">
-    <a href="{{ url_for('shop.product', product_id=p.product_id) }}" tabindex="-1" aria-hidden="true">{{ garment(p.kind, p.color_key) }}</a>
+    <a href="{{ url_for('shop.product', product_id=p.product_id) }}" tabindex="-1" aria-hidden="true">{{ product_visual(p) }}</a>
     {{ fav_button(p, is_fav, next_url) }}
     {% if not p.in_stock %}<span class="pcard__flag">Sold out</span>{% endif %}
   </div>
