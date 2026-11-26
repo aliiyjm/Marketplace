@@ -31,7 +31,7 @@ from View.MainViews.PY import (account_views, admin_views, auth_views,  # noqa: 
                                cart_views, seller_views, shop_views)
 from View.MainViews.PY.security import init_security, services  # noqa: E402
 
-STORE_NAME = "Marketplace"
+STORE_NAME = "Straw Denim"
 
 
 def _money(value):

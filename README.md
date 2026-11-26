@@ -1,4 +1,4 @@
-# CRUD_Marketplace · clothing marketplace
+# Straw Denim · clothing marketplace
 
 Transactional marketplace for clothing, shoes and accessories with a 17,000-product
 catalog. Python 3.13 + Flask, layered architecture:
