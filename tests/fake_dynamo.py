@@ -42,22 +42,17 @@ class TransactionCanceled(Exception):
                          "CancellationReasons": [{"Code": c} for c in codes]}
 
 
-def from_attribute(av):
-    """DynamoDB low-level attribute -> Python value (numbers as Decimal, like boto3)."""
-    (kind, value), = av.items()
-    if kind == "S":
-        return value
-    if kind == "N":
-        return Decimal(value)
-    if kind == "BOOL":
-        return value
-    if kind == "NULL":
-        return None
-    if kind == "M":
-        return {k: from_attribute(v) for k, v in value.items()}
-    if kind == "L":
-        return [from_attribute(v) for v in value]
-    raise NotImplementedError(kind)
+def _plain(value):
+    """Like the client of a boto3 Table resource: plain Python values only. A value that
+    is already in the low-level format ({"N": "1"}) would be stored as a map by the real
+    client, which is the bug this check catches."""
+    if isinstance(value, dict):
+        if len(value) == 1 and next(iter(value)) in ("S", "N", "M", "L", "BOOL", "NULL"):
+            raise TypeError(f"Low-level DynamoDB attribute passed to the resource client: {value}")
+        return {k: _plain(v) for k, v in value.items()}
+    if isinstance(value, float):
+        raise TypeError("Float types are not supported. Use Decimal types instead.")
+    return _as_dynamo(copy.deepcopy(value))
 
 
 class _FakeClient:
@@ -76,15 +71,15 @@ class _FakeClient:
             (kind, body), = action.items()
             assert body["TableName"] == self.table.name
             if kind == "Put":
-                item = {k: from_attribute(v) for k, v in body["Item"].items()}
+                item = _plain(body["Item"])
                 key = (item["PK"], item["SK"])
             else:
-                key = tuple(from_attribute(body["Key"][k]) for k in ("PK", "SK"))
+                key = tuple(_plain(body["Key"][k]) for k in ("PK", "SK"))
             if key in touched:                       # real DynamoDB rejects this too
                 raise ValueError("Transaction touches the same item twice")
             touched.add(key)
             current = self.table.items.get(key)
-            values = {k: from_attribute(v) for k, v in body.get("ExpressionAttributeValues", {}).items()}
+            values = {k: _plain(v) for k, v in body.get("ExpressionAttributeValues", {}).items()}
             ok = self._condition(body.get("ConditionExpression"), current, values,
                                  body.get("ExpressionAttributeNames", {}))
             codes.append("None" if ok else "ConditionalCheckFailed")

@@ -50,6 +50,10 @@ Demo accounts (password `Demo1234`):
 | carlos@urbanthread.mx | seller · Urban Thread (dashboard, alerts) |
 | admin@marketplace.mx | admin (users, categories, order status) |
 
+## Deploy to AWS (Learner Lab)
+
+`python scripts/aws_deploy.py` checks and `--apply` deploys the Lambda, its API Gateway routes, the S3 photo bucket and the Lambda settings with the temporary Learner Lab credentials; `python scripts/install_procedures.py` installs the stored procedures. Step by step in Spanish: `docs/DESPLIEGUE_AWS.md`.
+
 ## Automated tests
 
 ```bash

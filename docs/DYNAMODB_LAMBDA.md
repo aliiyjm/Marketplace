@@ -39,7 +39,7 @@ partir de las capas del proyecto con `python scripts/build_single_file_lambda.py
    del archivo `lambda_deploy/lambda_function.py`. Ya incluye usuarios, productos, carrito y favoritos.
 2. **Runtime settings → Handler:** `lambda_function.lambda_handler` (es el que ya tenías).
 3. Presiona **Deploy**.
-4. **Configuración → Configuración general:** tiempo de espera **30 s** y memoria **512 MB**.
+4. **Configuración → Configuración general:** tiempo de espera **30 s** y memoria **256 MB** (el Learner Lab exige entre 128 y 256 MB).
 5. **Configuración → Variables de entorno:**
 
    | Variable | Valor |

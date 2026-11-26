@@ -5,5 +5,7 @@ Pillow>=11.0,<13
 # database drivers (only needed when FINANCE_BACKEND=mysql / OPERATIONS_BACKEND=postgres)
 PyMySQL>=1.1,<2
 psycopg[binary]>=3.1,<4
+# deployment script (scripts/aws_deploy.py) with the Learner Lab credentials
+boto3>=1.34,<2
 # development / automated tests
 pytest>=8

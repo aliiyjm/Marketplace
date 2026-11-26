@@ -114,7 +114,7 @@ def run_mysql():
               raises(lambda: order(20003, lines, last4=None), ValidationError, "card"))
         check("rejected orders leave nothing behind", repo.get_order(20002) is None and repo.get_order(20003) is None)
         order(20004, lines[:1], method="cash", last4=None)
-        check("cash order has no card digits", repo.get_order(20004)["payment"]["card_last4"] is None)
+        check("cash order has no card digits", not repo.get_order(20004)["payment"]["card_last4"])
 
         print(" sp_change_order_status")
         repo.update_status(20001, "Pending", "Paid", now.isoformat(),

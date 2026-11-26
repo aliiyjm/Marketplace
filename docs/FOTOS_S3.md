@@ -36,6 +36,9 @@ Seguridad aplicada:
 
 ## Pasos en AWS (una sola vez)
 
+> **Forma rápida:** `python scripts/aws_deploy.py --apply` hace los pasos 1 a 5 solo
+> (ver [DESPLIEGUE_AWS.md](DESPLIEGUE_AWS.md)). Abajo están los mismos pasos a mano en la consola.
+
 ### 1. Crear el bucket
 
 1. Consola de AWS → busca **S3** → **Create bucket**.

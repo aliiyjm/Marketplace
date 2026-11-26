@@ -742,24 +742,6 @@ class S3ImageStore(ProductImageStoreInterface):
 image_log = logging.getLogger("product_images")
 
 
-def to_attribute(value):
-    """Python value -> DynamoDB low-level attribute ({"S": ...}, {"N": ...}),
-    the format TransactWriteItems needs (the Table resource does it for us elsewhere)."""
-    if isinstance(value, bool):
-        return {"BOOL": value}
-    if value is None:
-        return {"NULL": True}
-    if isinstance(value, str):
-        return {"S": value}
-    if isinstance(value, (int, Decimal)):
-        return {"N": str(value)}
-    if isinstance(value, dict):
-        return {"M": {str(k): to_attribute(v) for k, v in value.items()}}
-    if isinstance(value, (list, tuple)):
-        return {"L": [to_attribute(v) for v in value]}
-    raise TypeError(f"Unsupported value for DynamoDB: {type(value).__name__}")
-
-
 def cancellation_codes(error):
     """['None', 'ConditionalCheckFailed', ...] of a TransactionCanceledException, or None."""
     response = getattr(error, "response", {}) or {}
@@ -949,13 +931,16 @@ class ProductServiceImplementation(ProductServiceInterface):
         return {"PK": RESERVATION_PREFIX + str(order_id), "SK": SK_RESERVATION}
 
     def _transact(self, actions):
-        """One TransactWriteItems call (all actions succeed or none is applied)."""
+        """One TransactWriteItems call (all actions succeed or none is applied).
+        table.meta.client is the client of the Table RESOURCE: like the resource,
+        it converts plain Python values (str, int, Decimal, dict) to DynamoDB
+        attributes itself, so the actions carry plain values."""
         self.table.meta.client.transact_write_items(TransactItems=actions)
 
     def _update(self, key, expression, condition, values, names=None):
-        update = {"TableName": self.table.name, "Key": {k: to_attribute(v) for k, v in key.items()},
+        update = {"TableName": self.table.name, "Key": dict(key),
                   "UpdateExpression": expression, "ConditionExpression": condition,
-                  "ExpressionAttributeValues": {k: to_attribute(v) for k, v in values.items()}}
+                  "ExpressionAttributeValues": dict(values)}
         if names:
             update["ExpressionAttributeNames"] = names
         return {"Update": update}
@@ -974,7 +959,7 @@ class ProductServiceImplementation(ProductServiceInterface):
         reservation = dict(self._reservation_key(order_id), entity="STOCK_RESERVATION", order_id=str(order_id),
                            status="RESERVED", items={pid: quantities[pid] for pid in products}, created_at=now)
         actions = [{"Put": {"TableName": self.table.name,
-                            "Item": {k: to_attribute(v) for k, v in reservation.items()},
+                            "Item": reservation,
                             "ConditionExpression": "attribute_not_exists(PK)"}}]
         for product_id in products:
             actions.append(self._update(self._key(product_id), "SET stock = stock - :q",
