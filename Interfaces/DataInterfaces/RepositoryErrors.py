@@ -20,3 +20,13 @@ class DuplicateKey(ValidationError):
 
 class StaleWrite(ValidationError):
     """The record changed since it was read (optimistic concurrency check)."""
+
+
+class ProcedureError(ValidationError):
+    """A stored procedure refused the operation with SIGNAL SQLSTATE '45000'
+    (MySQL) or RAISE EXCEPTION (PostgreSQL). `code` is the short reason the
+    procedure gave, e.g. STALE_ORDER or INVALID_TRANSITION."""
+
+    def __init__(self, code, message=None):
+        super().__init__(message or code)
+        self.code = code

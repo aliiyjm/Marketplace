@@ -33,6 +33,105 @@ def _as_dynamo(value):
     return value
 
 
+class TransactionCanceled(Exception):
+    """Like botocore's ClientError for TransactWriteItems: one reason per action."""
+
+    def __init__(self, codes):
+        super().__init__("Transaction cancelled")
+        self.response = {"Error": {"Code": "TransactionCanceledException"},
+                         "CancellationReasons": [{"Code": c} for c in codes]}
+
+
+def from_attribute(av):
+    """DynamoDB low-level attribute -> Python value (numbers as Decimal, like boto3)."""
+    (kind, value), = av.items()
+    if kind == "S":
+        return value
+    if kind == "N":
+        return Decimal(value)
+    if kind == "BOOL":
+        return value
+    if kind == "NULL":
+        return None
+    if kind == "M":
+        return {k: from_attribute(v) for k, v in value.items()}
+    if kind == "L":
+        return [from_attribute(v) for v in value]
+    raise NotImplementedError(kind)
+
+
+class _FakeClient:
+    """table.meta.client: only transact_write_items, with all-or-nothing semantics."""
+
+    def __init__(self, table):
+        self.table = table
+        self.transactions = 0
+
+    def transact_write_items(self, TransactItems):
+        if len(TransactItems) > 100:
+            raise ValueError("Too many actions in one transaction")
+        touched = set()
+        plan, codes = [], []
+        for action in TransactItems:
+            (kind, body), = action.items()
+            assert body["TableName"] == self.table.name
+            if kind == "Put":
+                item = {k: from_attribute(v) for k, v in body["Item"].items()}
+                key = (item["PK"], item["SK"])
+            else:
+                key = tuple(from_attribute(body["Key"][k]) for k in ("PK", "SK"))
+            if key in touched:                       # real DynamoDB rejects this too
+                raise ValueError("Transaction touches the same item twice")
+            touched.add(key)
+            current = self.table.items.get(key)
+            values = {k: from_attribute(v) for k, v in body.get("ExpressionAttributeValues", {}).items()}
+            ok = self._condition(body.get("ConditionExpression"), current, values,
+                                 body.get("ExpressionAttributeNames", {}))
+            codes.append("None" if ok else "ConditionalCheckFailed")
+            plan.append((kind, key, body, values, item if kind == "Put" else None))
+        if "ConditionalCheckFailed" in codes:
+            raise TransactionCanceled(codes)         # nothing was applied
+        for kind, key, body, values, item in plan:
+            if kind == "Put":
+                self.table.items[key] = copy.deepcopy(item)
+            else:
+                self._apply(self.table.items[key], body["UpdateExpression"], values,
+                            body.get("ExpressionAttributeNames", {}))
+        self.transactions += 1
+        return {}
+
+    @staticmethod
+    def _condition(expr, item, values, names):
+        if expr is None:
+            return True
+        if expr == "attribute_not_exists(PK)":
+            return item is None
+        if expr == "attribute_exists(PK)":
+            return item is not None
+        if expr == "attribute_exists(PK) AND stock >= :q":
+            return item is not None and item["stock"] >= values[":q"]
+        if expr == "#st = :reserved":
+            return item is not None and item.get(names["#st"]) == values[":reserved"]
+        raise NotImplementedError(expr)
+
+    @staticmethod
+    def _apply(item, expr, values, names):
+        if expr == "SET stock = stock - :q":
+            item["stock"] -= values[":q"]
+        elif expr == "SET stock = stock + :q":
+            item["stock"] += values[":q"]
+        elif expr == "SET #st = :released, released_at = :now":
+            item[names["#st"]] = values[":released"]
+            item["released_at"] = values[":now"]
+        else:
+            raise NotImplementedError(expr)
+
+
+class _Meta:
+    def __init__(self, table):
+        self.client = _FakeClient(table)
+
+
 class _BatchWriter:
     def __init__(self, table):
         self.table = table
@@ -49,12 +148,14 @@ class _BatchWriter:
 
 
 class FakeTable:
-    def __init__(self):
+    def __init__(self, name="MarketplaceDB"):
+        self.name = name
         self.items = {}
         self.writes = 0
+        self.meta = _Meta(self)
 
     # ---- single item ----
-    def get_item(self, Key):
+    def get_item(self, Key, ConsistentRead=False):
         item = self.items.get((Key["PK"], Key["SK"]))
         return {"Item": copy.deepcopy(item)} if item else {}
 

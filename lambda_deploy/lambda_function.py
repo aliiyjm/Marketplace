@@ -36,6 +36,7 @@ import secrets
 import unicodedata
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 
@@ -168,6 +169,14 @@ class ImagesDisabled(ProductStoreError):
     """Photos are not configured (the Lambda has no MARKETPLACE_BUCKET)."""
 
 
+class ReservationExists(ProductStoreError):
+    """That order number already has a stock reservation (another checkout took it)."""
+
+
+class ReservationNotFound(ProductStoreError):
+    """The order has no stock reservation (orders created before reservations existed)."""
+
+
 class ProductImageStoreInterface(ABC):
     """Where photo files live (S3 bucket in AWS, a dict in the tests)."""
 
@@ -228,6 +237,20 @@ class ProductServiceInterface(ABC):
     def remove_image(self, product_id):
         """Delete the photo of the product (back to the SVG silhouette)."""
 
+    @abstractmethod
+    def reserve_stock(self, order_id, quantities):
+        """ATOMIC TRANSACTION 1 (TransactWriteItems): discount the stock of every
+        product of the order and write the reservation, all or nothing.
+        `quantities` = {product_id: qty}. Returns {product_id: new_stock}.
+        Raises OutOfStock / ProductNotFound / ReservationExists."""
+
+    @abstractmethod
+    def release_stock(self, order_id):
+        """ATOMIC TRANSACTION 2 (TransactWriteItems): mark the reservation as
+        released and give the stock back, all or nothing and only once.
+        Returns (released, {product_id: new_stock}); released=False when it was
+        already released. Raises ReservationNotFound."""
+
 
 # ======================================================================
 # from Interfaces/ProductServiceInterface/ProductDTO.py
@@ -239,6 +262,11 @@ ATTR_KEY_RE = re.compile(r"[A-Za-zÀ-ÿ0-9][A-Za-zÀ-ÿ0-9 &/().-]{0,39}")
 MAX_ATTRIBUTES = 15
 SK_PRODUCT = "METADATA"
 PK_PREFIX = "PRODUCT#"
+RESERVATION_PREFIX = "RESERVATION#"
+SK_RESERVATION = "STOCK"
+ORDER_ID_RE = re.compile(r"\d{1,12}")
+MAX_RESERVATION_PRODUCTS = 50        # DynamoDB allows 100 actions per transaction
+MAX_LINE_QTY = 1000
 IMAGE_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}   # never SVG (it can run scripts)
 MAX_IMAGE_BYTES = 1_500_000          # what the Lambda accepts (the Flask app sends a re-encoded JPEG)
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024   # what a seller may upload in the form (before re-encoding)
@@ -712,6 +740,34 @@ class S3ImageStore(ProductImageStoreInterface):
 # from Implementation/ProductServiceImplementation/ProductServiceImplementation.py
 # ======================================================================
 image_log = logging.getLogger("product_images")
+
+
+def to_attribute(value):
+    """Python value -> DynamoDB low-level attribute ({"S": ...}, {"N": ...}),
+    the format TransactWriteItems needs (the Table resource does it for us elsewhere)."""
+    if isinstance(value, bool):
+        return {"BOOL": value}
+    if value is None:
+        return {"NULL": True}
+    if isinstance(value, str):
+        return {"S": value}
+    if isinstance(value, (int, Decimal)):
+        return {"N": str(value)}
+    if isinstance(value, dict):
+        return {"M": {str(k): to_attribute(v) for k, v in value.items()}}
+    if isinstance(value, (list, tuple)):
+        return {"L": [to_attribute(v) for v in value]}
+    raise TypeError(f"Unsupported value for DynamoDB: {type(value).__name__}")
+
+
+def cancellation_codes(error):
+    """['None', 'ConditionalCheckFailed', ...] of a TransactionCanceledException, or None."""
+    response = getattr(error, "response", {}) or {}
+    if response.get("Error", {}).get("Code") != "TransactionCanceledException":
+        return None
+    return [reason.get("Code", "None") for reason in response.get("CancellationReasons", [])]
+
+
 MAX_PAGE = 2000
 MAX_STOCK_DELTA = 10000
 _CURSOR_KEYS = {"PK", "SK", "GSI1PK", "GSI1SK"}
@@ -887,6 +943,85 @@ class ProductServiceImplementation(ProductServiceInterface):
             raise
         self._delete_old(current.image_url)
 
+    # ---------- atomic stock transactions ----------
+    @staticmethod
+    def _reservation_key(order_id):
+        return {"PK": RESERVATION_PREFIX + str(order_id), "SK": SK_RESERVATION}
+
+    def _transact(self, actions):
+        """One TransactWriteItems call (all actions succeed or none is applied)."""
+        self.table.meta.client.transact_write_items(TransactItems=actions)
+
+    def _update(self, key, expression, condition, values, names=None):
+        update = {"TableName": self.table.name, "Key": {k: to_attribute(v) for k, v in key.items()},
+                  "UpdateExpression": expression, "ConditionExpression": condition,
+                  "ExpressionAttributeValues": {k: to_attribute(v) for k, v in values.items()}}
+        if names:
+            update["ExpressionAttributeNames"] = names
+        return {"Update": update}
+
+    def _stocks(self, product_ids):
+        out = {}
+        for product_id in product_ids:
+            item = self.table.get_item(Key=self._key(product_id), ConsistentRead=True).get("Item")
+            if item:
+                out[product_id] = int(item["stock"])
+        return out
+
+    def reserve_stock(self, order_id, quantities):
+        products = sorted(quantities)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        reservation = dict(self._reservation_key(order_id), entity="STOCK_RESERVATION", order_id=str(order_id),
+                           status="RESERVED", items={pid: quantities[pid] for pid in products}, created_at=now)
+        actions = [{"Put": {"TableName": self.table.name,
+                            "Item": {k: to_attribute(v) for k, v in reservation.items()},
+                            "ConditionExpression": "attribute_not_exists(PK)"}}]
+        for product_id in products:
+            actions.append(self._update(self._key(product_id), "SET stock = stock - :q",
+                                        "attribute_exists(PK) AND stock >= :q", {":q": quantities[product_id]}))
+        try:
+            self._transact(actions)
+        except Exception as e:
+            codes = cancellation_codes(e)
+            if codes is None:
+                raise
+            if codes and codes[0] == "ConditionalCheckFailed":
+                raise ReservationExists(f"Order {order_id} already has a reservation.") from None
+            for product_id, code in zip(products, codes[1:]):
+                if code == "ConditionalCheckFailed":
+                    current = self.get(product_id)
+                    if current is None:
+                        raise ProductNotFound(f"Product {product_id} does not exist.") from None
+                    raise OutOfStock(f"Only {current.stock} left of {current.name}.") from None
+            raise ValidationError("The stock is busy right now. Please try again.") from None
+        return self._stocks(products)
+
+    def release_stock(self, order_id):
+        key = self._reservation_key(order_id)
+        reservation = self.table.get_item(Key=key, ConsistentRead=True).get("Item")
+        if not reservation:
+            raise ReservationNotFound(f"Order {order_id} has no stock reservation.")
+        items = {pid: int(qty) for pid, qty in reservation.get("items", {}).items()}
+        if reservation.get("status") != "RESERVED":
+            return False, {}
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        actions = [self._update(key, "SET #st = :released, released_at = :now", "#st = :reserved",
+                                {":released": "RELEASED", ":reserved": "RESERVED", ":now": now},
+                                names={"#st": "status"})]
+        for product_id in sorted(items):
+            actions.append(self._update(self._key(product_id), "SET stock = stock + :q",
+                                        "attribute_exists(PK)", {":q": items[product_id]}))
+        try:
+            self._transact(actions)
+        except Exception as e:
+            codes = cancellation_codes(e)
+            if codes is None:
+                raise
+            if codes and codes[0] == "ConditionalCheckFailed":
+                return False, {}                    # someone released it a moment ago
+            raise ValidationError("The stock could not be returned right now. Please try again.") from None
+        return True, self._stocks(sorted(items))
+
 
 # ======================================================================
 # from Implementation/UserServiceImplementation/UserDynamoImplementation.py
@@ -1013,12 +1148,16 @@ PRODUCT_DELETE = "/productos/eliminar"
 PRODUCT_STOCK = "/productos/stock"
 PRODUCT_LOAD = "/productos/cargar"
 PRODUCT_IMAGE = "/productos/imagen"
+PRODUCT_RESERVE = "/productos/reservar"
+PRODUCT_RELEASE = "/productos/liberar"
 PRODUCT_ROUTES = {
     (PRODUCT_QUERY, "GET"), (PRODUCT_ADD, "POST"), (PRODUCT_UPDATE, "PUT"),
     (PRODUCT_DELETE, "DELETE"), (PRODUCT_STOCK, "POST"), (PRODUCT_LOAD, "POST"),
     (PRODUCT_IMAGE, "POST"), (PRODUCT_IMAGE, "DELETE"),
+    (PRODUCT_RESERVE, "POST"), (PRODUCT_RELEASE, "POST"),
 }
-PRODUCT_WRITE_ROUTES = {PRODUCT_ADD, PRODUCT_UPDATE, PRODUCT_DELETE, PRODUCT_STOCK, PRODUCT_LOAD, PRODUCT_IMAGE}
+PRODUCT_WRITE_ROUTES = {PRODUCT_ADD, PRODUCT_UPDATE, PRODUCT_DELETE, PRODUCT_STOCK, PRODUCT_LOAD, PRODUCT_IMAGE,
+                        PRODUCT_RESERVE, PRODUCT_RELEASE}
 _product_service = None
 
 
@@ -1039,6 +1178,32 @@ def default_product_service():
     if _product_service is None:
         _product_service = ProductServiceImplementation(get_table(), gsi_name(), images=default_image_store())
     return _product_service
+
+
+def _order_id(value):
+    value = str(value or "")
+    if not ORDER_ID_RE.fullmatch(value):
+        raise ValidationError("order_id must be the order number (digits only).")
+    return value
+
+
+def _quantities(raw):
+    """[{product_id, qty}] -> {product_id: total qty}. The same product can come in
+    several lines (sizes/colors) but a transaction may touch each item only once."""
+    if not isinstance(raw, list) or not raw:
+        raise ValidationError("items must be a non-empty list.")
+    out = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValidationError("Each item must be an object {product_id, qty}.")
+        qty = entry.get("qty")
+        if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= MAX_LINE_QTY:
+            raise ValidationError(f"qty must be a whole number from 1 to {MAX_LINE_QTY}.")
+        product_id = _product_id(entry.get("product_id"))
+        out[product_id] = out.get(product_id, 0) + qty
+    if len(out) > MAX_RESERVATION_PRODUCTS:
+        raise ValidationError(f"At most {MAX_RESERVATION_PRODUCTS} different products per order.")
+    return out
 
 
 def _photo(data):
@@ -1114,6 +1279,14 @@ def handle_productos(event, context=None, service=None):
             return response(200, {"product_id": product_id, "image_url": url})
 
         data = json_body(body)
+        if route == PRODUCT_RESERVE:
+            order_id = _order_id(data.get("order_id"))
+            stock = svc.reserve_stock(order_id, _quantities(data.get("items")))
+            return response(200, {"order_id": order_id, "stock": stock})
+        if route == PRODUCT_RELEASE:
+            order_id = _order_id(data.get("order_id"))
+            released, stock = svc.release_stock(order_id)
+            return response(200, {"order_id": order_id, "released": released, "stock": stock})
         if route == PRODUCT_ADD:
             item = ProductItem.from_payload(data)
             svc.create(item)
@@ -1145,6 +1318,10 @@ def handle_productos(event, context=None, service=None):
         return response(409, {"error": str(e), "code": "EXISTS"})
     except ProductNotFound as e:
         return response(404, {"error": str(e), "code": "NOT_FOUND"})
+    except ReservationExists as e:
+        return response(409, {"error": str(e), "code": "RESERVED"})
+    except ReservationNotFound as e:
+        return response(404, {"error": str(e), "code": "NO_RESERVATION"})
     except ImagesDisabled as e:
         return response(503, {"error": str(e), "code": "IMAGES_DISABLED"})
     except ValidationError as e:

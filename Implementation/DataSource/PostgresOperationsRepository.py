@@ -118,18 +118,39 @@ class PostgresOperationsRepository(OperationsRepositoryInterface):
                             (r["product_id"], r["category_id"], r["seller_id"], r["quantity_sold"],
                              as_date(r["sale_date"])))
 
+    @property
+    def _functions(self):
+        """PostgreSQL uses the stored functions of database/operations_procedures.sql;
+        SQLite (tests) has none, so there the same query runs inline."""
+        return self.db.dialect == "postgres"
+
     def units_by_day(self, seller_id, since):
-        rows = self.db.query("SELECT sale_date, SUM(quantity_sold) AS units FROM analytics "
-                             "WHERE seller_id = %s AND sale_date >= %s GROUP BY sale_date",
-                             (seller_id, as_date(since)))
+        if self._functions:
+            rows = self.db.query("SELECT sale_date, units FROM fn_seller_units_by_day(%s, %s)",
+                                 (seller_id, as_date(since)))
+        else:
+            rows = self.db.query("SELECT sale_date, SUM(quantity_sold) AS units FROM analytics "
+                                 "WHERE seller_id = %s AND sale_date >= %s GROUP BY sale_date",
+                                 (seller_id, as_date(since)))
         return {as_iso(r["sale_date"])[:10]: int(r["units"]) for r in rows}
 
     def top_products(self, seller_id, since, limit=5):
-        rows = self.db.query("SELECT product_id, SUM(quantity_sold) AS units FROM analytics "
-                             "WHERE seller_id = %s AND sale_date >= %s GROUP BY product_id "
-                             "ORDER BY units DESC, product_id LIMIT %s",
-                             (seller_id, as_date(since), limit))
-        return [(r["product_id"], int(r["units"])) for r in rows]
+        return [(r["product_id"], r["units"]) for r in self.seller_history(seller_id, since, limit)]
+
+    def seller_history(self, seller_id, since, limit=5):
+        """Consolidated history of a seller (stored function fn_seller_sales_history)."""
+        if self._functions:
+            rows = self.db.query("SELECT product_id, units, days_with_sales, first_sale, last_sale "
+                                 "FROM fn_seller_sales_history(%s, %s, %s)", (seller_id, as_date(since), limit))
+        else:
+            rows = self.db.query("SELECT product_id, SUM(quantity_sold) AS units, "
+                                 "COUNT(DISTINCT sale_date) AS days_with_sales, MIN(sale_date) AS first_sale, "
+                                 "MAX(sale_date) AS last_sale FROM analytics "
+                                 "WHERE seller_id = %s AND sale_date >= %s GROUP BY product_id "
+                                 "ORDER BY units DESC, product_id LIMIT %s", (seller_id, as_date(since), limit))
+        return [{"product_id": r["product_id"], "units": int(r["units"]),
+                 "days_with_sales": int(r["days_with_sales"]), "first_sale": as_iso(r["first_sale"])[:10],
+                 "last_sale": as_iso(r["last_sale"])[:10]} for r in rows]
 
     # ---------- alerts ----------
     @staticmethod

@@ -107,6 +107,8 @@ class TopProductDTO:
     name: str
     category: str
     units: int
+    days_with_sales: int = 0
+    last_sale: str = ""          # "Nov 3"
 
 
 @dataclass(frozen=True)

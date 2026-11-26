@@ -57,13 +57,14 @@
 <section class="card card--flush table-wrap" aria-labelledby="top-h">
   <h2 id="top-h" class="h-card card__title">Best-selling products</h2>
   <table class="table">
-    <thead><tr><th scope="col">Product</th><th scope="col">Category</th><th scope="col" class="num">Units sold</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+    <thead><tr><th scope="col">Product</th><th scope="col">Category</th><th scope="col" class="num">Units sold</th><th scope="col" class="num">Days with sales</th><th scope="col">Last sale</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
     <tbody>
       {% for t in d.top_products %}
         <tr><td class="strong">{{ t.name }}</td><td class="muted">{{ t.category }}</td><td class="num">{{ t.units }}</td>
+            <td class="num">{{ t.days_with_sales }}</td><td class="muted">{{ t.last_sale }}</td>
             <td class="num"><a href="{{ url_for('seller.edit_product', product_id=t.product_id) }}">Edit</a></td></tr>
       {% else %}
-        <tr><td colspan="4" class="empty">No sales in this period yet.</td></tr>
+        <tr><td colspan="6" class="empty">No sales in this period yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

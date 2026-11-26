@@ -4,7 +4,7 @@ Every method receives the seller_id resolved from the session; product
 lookups always check `seller_id` so one seller cannot edit another's items.
 """
 import math
-from datetime import timedelta
+from datetime import date, timedelta
 
 from Implementation.DataSource.Inventory import refresh_alert
 from Implementation.DataSource.Mappers import product_to_dto, search_text
@@ -57,11 +57,15 @@ class SellerServiceImplementation(SellerServiceInterface):
                  for d in last14]
 
         top = []
-        for pid, qty in store.ops.top_products(seller_id, since, 5):
-            p = store.products.get(pid)
+        # Consolidated history of the seller (stored function fn_seller_sales_history in PostgreSQL)
+        for row in store.ops.seller_history(seller_id, since, 5):
+            p = store.products.get(row["product_id"])
             if p:
                 dto = product_to_dto(store, p)
-                top.append(TopProductDTO(pid, dto.name, f"{dto.parent_category_name} › {dto.category_name}", int(qty)))
+                last = date.fromisoformat(str(row["last_sale"])[:10]) if row["last_sale"] else None
+                top.append(TopProductDTO(row["product_id"], dto.name,
+                                         f"{dto.parent_category_name} › {dto.category_name}", int(row["units"]),
+                                         int(row["days_with_sales"]), _short(last) if last else ""))
 
         alerts = store.ops.alerts_for_seller(seller_id, 6)
         open_alerts = store.ops.count_open_alerts(seller_id)

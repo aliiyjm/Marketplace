@@ -89,6 +89,7 @@ python -m pytest -q
 - Roles checked on the server (`login_required`, `seller_required`, `admin_required`).
 - Ownership checks: buyers only see their orders and invoices; sellers only edit their products (`seller_id` always comes from the session).
 - Prices and totals recalculated on the server; checkout validates stock and writes all tables at once.
+- Atomic logic (see `docs/STORED_PROCEDURES.md`): stock is discounted/returned with DynamoDB `TransactWriteItems` (all products or none, a cancelled order restocks only once) and orders go through MySQL stored procedures (`sp_create_order`, `sp_change_order_status`, `sp_cancel_order` with row locks; `sp_buyer_sales_history`) and PostgreSQL functions (`fn_seller_sales_history`).
 - Card numbers are validated (Luhn, expiry, CVV) and discarded; only the last 4 digits are kept.
 - DTOs whitelist fields and limit lengths; Jinja autoescaping on every template.
 - SQL: parameterized queries only (no SQL injection), one transaction per order / status change, optimistic check on status changes, friendly 503 page when a database is down, credentials only in `.env` (git-ignored).

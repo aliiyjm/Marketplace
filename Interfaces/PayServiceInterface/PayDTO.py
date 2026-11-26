@@ -164,6 +164,15 @@ class InvoiceDTO:
 
 
 @dataclass(frozen=True)
+class BuyerHistoryDTO:
+    """Consolidated history of a buyer (sp_buyer_sales_history). Cancelled orders do not count."""
+    orders_count: int
+    active_orders: int
+    total_spent: Decimal
+    units_bought: int
+
+
+@dataclass(frozen=True)
 class OrderDTO:
     order_id: int
     buyer_id: str

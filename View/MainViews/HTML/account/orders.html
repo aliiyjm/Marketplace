@@ -13,6 +13,14 @@
   </form>
 </div>
 
+{% if history and history.orders_count %}
+<section class="kpis" aria-label="My purchase history">
+  <div class="card kpi"><span class="kpi__label">Orders</span><span class="kpi__value">{{ history.orders_count }}</span><span class="muted small">{{ history.active_orders }} not cancelled</span></div>
+  <div class="card kpi"><span class="kpi__label">Total spent</span><span class="kpi__value">{{ history.total_spent|money }}</span><span class="muted small">MXN, IVA included</span></div>
+  <div class="card kpi"><span class="kpi__label">Items bought</span><span class="kpi__value">{{ history.units_bought }}</span><span class="muted small">units in all your orders</span></div>
+</section>
+{% endif %}
+
 <nav class="tabs" aria-label="Filter by status">
   <a href="{{ url_for('account.orders') }}" {% if not status %}aria-current="page"{% endif %}>All</a>
   {% for s in statuses %}

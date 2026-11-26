@@ -28,6 +28,15 @@ MAX_ATTRIBUTES = 15
 SK_PRODUCT = "METADATA"
 PK_PREFIX = "PRODUCT#"
 
+# ---------- stock reservations (atomic transactions) ----------
+#   PK = RESERVATION#<order_id>   SK = STOCK   status = RESERVED | RELEASED
+#   items = {product_id: qty}     one per order: it also "locks" the order number
+RESERVATION_PREFIX = "RESERVATION#"
+SK_RESERVATION = "STOCK"
+ORDER_ID_RE = re.compile(r"\d{1,12}")
+MAX_RESERVATION_PRODUCTS = 50        # DynamoDB allows 100 actions per transaction
+MAX_LINE_QTY = 1000
+
 # ---------- product photos ----------
 IMAGE_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}   # never SVG (it can run scripts)
 MAX_IMAGE_BYTES = 1_500_000          # what the Lambda accepts (the Flask app sends a re-encoded JPEG)

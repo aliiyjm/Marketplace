@@ -27,7 +27,9 @@ def confirmation(order_id):
 @login_required
 def orders():
     rows, status, q = services().pay.my_orders(g.user.id_user, request.args)
-    return render_template("account/orders.html", orders=rows, status=status, q=q, statuses=ORDER_STATUSES)
+    history = services().pay.my_history(g.user.id_user)
+    return render_template("account/orders.html", orders=rows, status=status, q=q, statuses=ORDER_STATUSES,
+                           history=history)
 
 
 @bp.get("/orders/<int:order_id>")

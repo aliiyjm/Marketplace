@@ -24,3 +24,7 @@ class PayServiceInterface(ABC):
     @abstractmethod
     def all_orders(self, status=None, q=""):
         """Every order (admin)."""
+
+    @abstractmethod
+    def sales_history(self, user_id):
+        """BuyerHistoryDTO: consolidated history of the buyer (stored procedure)."""

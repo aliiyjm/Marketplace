@@ -7,10 +7,12 @@ same contracts, so the business logic does not change when they are switched on.
 import copy
 from collections import Counter
 
-from Interfaces.DataInterfaces.FinanceRepositoryInterface import FinanceRepositoryInterface
+from Interfaces.DataInterfaces.FinanceRepositoryInterface import (FinanceRepositoryInterface,
+                                                                  history_summary)
 from Interfaces.DataInterfaces.OperationsRepositoryInterface import OperationsRepositoryInterface
 from Interfaces.DataInterfaces.QuickRepositoryInterface import QuickRepositoryInterface
 from Interfaces.DataInterfaces.RepositoryErrors import DuplicateKey, StaleWrite
+from Interfaces.Validators import ValidationError
 
 
 class MemoryFinanceRepository(FinanceRepositoryInterface):
@@ -48,6 +50,36 @@ class MemoryFinanceRepository(FinanceRepositoryInterface):
                 s.payments[order_id]["status"] = payment_status
             if invoice:
                 s.invoices[order_id] = dict(invoice, order_id=order_id)
+
+    def cancel_order(self, order_id, old_status, changed_at):
+        """Same rules as sp_cancel_order."""
+        s = self.store
+        with s.lock:
+            order = s.orders.get(order_id)
+            if not order:
+                raise ValidationError("Order not found.")
+            if order["status"] != old_status:
+                raise StaleWrite("The order changed meanwhile. Reload the page and try again.")
+            if old_status not in ("Pending", "Paid"):
+                raise ValidationError(f"An order that is {old_status} cannot be cancelled.")
+            self.update_status(order_id, old_status, "Cancelled", changed_at,
+                               "Refunded" if old_status == "Paid" else "Cancelled")
+            returned = {}
+            for item in s.order_items.get(order_id, []):
+                returned[item["product_id"]] = returned.get(item["product_id"], 0) + item["quantity"]
+            return returned
+
+    def buyer_history(self, buyer_id):
+        """Same result as sp_buyer_sales_history."""
+        s = self.store
+        rows = []
+        for o in sorted((o for o in s.orders.values() if o["buyer_id"] == buyer_id),
+                        key=lambda o: (o["created_at"], o["order_id"]), reverse=True):
+            items = s.order_items.get(o["order_id"], [])
+            rows.append({"order_id": o["order_id"], "created_at": o["created_at"], "status": o["status"],
+                         "total_amount": o["total_amount"], "line_count": len(items),
+                         "units": sum(i["quantity"] for i in items)})
+        return history_summary(rows)
 
     def _full(self, o):
         s = self.store
@@ -175,6 +207,18 @@ class MemoryOperationsRepository(OperationsRepositoryInterface):
             if sale["seller_id"] == seller_id and sale["sale_date"] >= start:
                 out[sale["product_id"]] += sale["quantity_sold"]
         return out.most_common(limit)
+
+    def seller_history(self, seller_id, since, limit=5):
+        start = since.isoformat()
+        per = {}
+        for sale in self.store.analytics:
+            if sale["seller_id"] == seller_id and sale["sale_date"] >= start:
+                row = per.setdefault(sale["product_id"], {"product_id": sale["product_id"], "units": 0, "days": set()})
+                row["units"] += sale["quantity_sold"]
+                row["days"].add(sale["sale_date"])
+        rows = sorted(per.values(), key=lambda r: (-r["units"], r["product_id"]))[:limit]
+        return [{"product_id": r["product_id"], "units": r["units"], "days_with_sales": len(r["days"]),
+                 "first_sale": min(r["days"]), "last_sale": max(r["days"])} for r in rows]
 
     # ---------- alerts ----------
     def open_alert(self, product_id):

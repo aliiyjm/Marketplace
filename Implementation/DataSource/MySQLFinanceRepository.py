@@ -4,10 +4,20 @@ orders, order_items, payments, shipping_addresses, invoices, order_status_histor
 The database keeps the conventions written in its script (statuses and
 payment methods in UPPERCASE: PENDING, PAID, CARD, TRANSFER, SUCCESS...);
 this class translates them to the names the app shows.
+
+With MySQL every write goes through the STORED PROCEDURES of
+database/finance_procedures.sql (CALL sp_create_order, sp_change_order_status,
+sp_cancel_order) and the buyer history comes from sp_buyer_sales_history.
+SQLite (automated tests) has no procedures, so there the same rules run as
+plain parameterized SQL in one transaction.
 """
+import json
+
 from Implementation.DataSource.SqlConnection import as_datetime, as_iso, as_money
-from Interfaces.DataInterfaces.FinanceRepositoryInterface import FinanceRepositoryInterface
-from Interfaces.DataInterfaces.RepositoryErrors import StaleWrite
+from Interfaces.DataInterfaces.FinanceRepositoryInterface import (FinanceRepositoryInterface,
+                                                                  history_summary)
+from Interfaces.DataInterfaces.RepositoryErrors import ProcedureError, StaleWrite
+from Interfaces.Validators import ValidationError
 
 ORDER_STATUS = {"Pending": "PENDING", "Paid": "PAID", "Shipped": "SHIPPED",
                 "Delivered": "DELIVERED", "Cancelled": "CANCELLED"}
@@ -15,6 +25,19 @@ PAY_METHOD = {"card": "CARD", "spei": "TRANSFER", "cash": "CASH"}
 PAY_STATUS = {"Approved": "SUCCESS", "Awaiting payment": "PENDING", "Cancelled": "CANCELLED",
               "Refunded": "REFUNDED", "Failed": "FAILED"}
 MAX_LIST = 200
+# Codes a stored procedure can SIGNAL -> message for the page.
+PROCEDURE_MESSAGES = {
+    "ORDER_NOT_FOUND": "Order not found.",
+    "INVALID_TRANSITION": "That status change is not allowed.",
+    "CANNOT_CANCEL": "Only pending or paid orders can be cancelled.",
+    "USE_SP_CANCEL_ORDER": "Cancellations go through sp_cancel_order.",
+    "EMPTY_ORDER": "The order has no items.",
+    "INVALID_ORDER_ITEMS": "The order has invalid items.",
+    "INVALID_PAYMENT_METHOD": "Choose a valid payment method.",
+    "INVALID_CARD_LAST4": "The card number is invalid.",
+    "INVALID_ZIP_CODE": "The ZIP code must have 5 digits.",
+    "INVALID_ORDER_ID": "Invalid order number.",
+}
 
 
 def _to_db(mapping, value):
@@ -28,9 +51,22 @@ def _from_db(mapping, value):
     return reverse.get(str(value).upper(), value)
 
 
+def _procedure_error(error):
+    if error.code == "STALE_ORDER":
+        return StaleWrite("The order changed meanwhile. Reload the page and try again.")
+    return ValidationError(PROCEDURE_MESSAGES.get(error.code, "The operation is not allowed."))
+
+
+def _lines_json(items):
+    return json.dumps([{"product_id": i["product_id"], "quantity": int(i["quantity"]),
+                        "unit_price": str(as_money(i["unit_price"])), "size": i.get("size"),
+                        "color": i.get("color")} for i in items])
+
+
 class MySQLFinanceRepository(FinanceRepositoryInterface):
-    def __init__(self, db):
-        self.db = db               # SqlDatabase (mysql)
+    def __init__(self, db, use_procedures=None):
+        self.db = db               # SqlDatabase (mysql, or sqlite in the tests)
+        self.use_procedures = db.dialect == "mysql" if use_procedures is None else use_procedures
 
     # ---------- writes ----------
     def next_order_id(self):
@@ -40,6 +76,16 @@ class MySQLFinanceRepository(FinanceRepositoryInterface):
 
     def create_order(self, order, items, shipping, payment, history):
         oid = str(order["order_id"])
+        if self.use_procedures:
+            try:
+                with self.db.transaction() as cur:
+                    cur.call("CALL sp_create_order(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                             (oid, order["buyer_id"], as_datetime(order["created_at"]), _lines_json(items),
+                              shipping["street"], shipping["city"], shipping["state"], shipping["zip_code"],
+                              _to_db(PAY_METHOD, payment["payment_method"]), payment.get("card_last4") or None))
+            except ProcedureError as e:
+                raise _procedure_error(e) from None
+            return
         with self.db.transaction() as cur:
             cur.execute("INSERT INTO orders (order_id, buyer_id, created_at, status, subtotal, tax_amount, "
                         "total_amount) VALUES (%s, %s, %s, %s, %s, %s, %s)",
@@ -66,6 +112,16 @@ class MySQLFinanceRepository(FinanceRepositoryInterface):
 
     def update_status(self, order_id, old_status, new_status, changed_at, payment_status=None, invoice=None):
         oid = str(order_id)
+        if self.use_procedures:
+            try:
+                with self.db.transaction() as cur:
+                    cur.call("CALL sp_change_order_status(%s, %s, %s, %s, %s, %s)",
+                             (oid, _to_db(ORDER_STATUS, old_status), _to_db(ORDER_STATUS, new_status),
+                              as_datetime(changed_at), str(invoice["invoice_id"]) if invoice else None,
+                              invoice["pdf_receipt_url"] if invoice else None))
+            except ProcedureError as e:
+                raise _procedure_error(e) from None
+            return
         with self.db.transaction() as cur:
             cur.execute("UPDATE orders SET status = %s WHERE order_id = %s AND status = %s",
                         (_to_db(ORDER_STATUS, new_status), oid, _to_db(ORDER_STATUS, old_status)))
@@ -83,6 +139,41 @@ class MySQLFinanceRepository(FinanceRepositoryInterface):
                             "VALUES (%s, %s, %s, %s)",
                             (str(invoice["invoice_id"]), oid, invoice["pdf_receipt_url"],
                              as_datetime(invoice["issued_at"])))
+
+    def cancel_order(self, order_id, old_status, changed_at):
+        oid = str(order_id)
+        if self.use_procedures:
+            try:
+                with self.db.transaction() as cur:
+                    rows = cur.call("CALL sp_cancel_order(%s, %s, %s)",
+                                    (oid, _to_db(ORDER_STATUS, old_status), as_datetime(changed_at)))
+            except ProcedureError as e:
+                raise _procedure_error(e) from None
+            return {r["product_id"]: int(r["quantity"]) for r in rows}
+        if old_status not in ("Pending", "Paid"):
+            raise ValidationError(PROCEDURE_MESSAGES["CANNOT_CANCEL"])
+        self.update_status(oid, old_status, "Cancelled", changed_at,
+                           "Refunded" if old_status == "Paid" else "Cancelled")
+        rows = self.db.query("SELECT product_id, SUM(quantity) AS quantity FROM order_items "
+                             "WHERE order_id = %s GROUP BY product_id ORDER BY product_id", (oid,))
+        return {r["product_id"]: int(r["quantity"]) for r in rows}
+
+    def buyer_history(self, buyer_id):
+        if self.use_procedures:
+            with self.db.transaction() as cur:
+                rows = cur.call("CALL sp_buyer_sales_history(%s)", (buyer_id,))
+        else:
+            rows = self.db.query(
+                "SELECT o.order_id, o.created_at, o.status, o.total_amount, COUNT(i.item_id) AS line_count, "
+                "COALESCE(SUM(i.quantity), 0) AS units FROM orders o "
+                "LEFT JOIN order_items i ON i.order_id = o.order_id WHERE o.buyer_id = %s "
+                "GROUP BY o.order_id, o.created_at, o.status, o.total_amount "
+                "ORDER BY o.created_at DESC, o.order_id DESC", (buyer_id,))
+        orders = [{"order_id": int(r["order_id"]) if str(r["order_id"]).isdigit() else r["order_id"],
+                   "created_at": as_iso(r["created_at"]), "status": _from_db(ORDER_STATUS, r["status"]),
+                   "total_amount": as_money(r["total_amount"]), "line_count": int(r["line_count"]),
+                   "units": int(r["units"])} for r in rows]
+        return history_summary(orders)
 
     # ---------- reads ----------
     def get_order(self, order_id):

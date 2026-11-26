@@ -72,6 +72,11 @@ class OperationsRepositoryInterface(ABC):
     def top_products(self, seller_id, since, limit=5):
         """[(product_id, units)] best sellers since `since`."""
 
+    @abstractmethod
+    def seller_history(self, seller_id, since, limit=5):
+        """Consolidated history (stored function fn_seller_sales_history):
+        [{"product_id","units","days_with_sales","first_sale","last_sale"}], best sellers first."""
+
     # ---------- alerts ----------
     @abstractmethod
     def open_alert(self, product_id):

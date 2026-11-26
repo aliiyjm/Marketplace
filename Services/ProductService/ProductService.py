@@ -13,6 +13,10 @@ Routes:
     POST   /productos/cargar      body: {items: [...]} (max 100)  initial bulk load
     POST   /productos/imagen      body: {product_id, content_type, data (base64)}  set photo (S3)
     DELETE /productos/imagen      ?product_id=PRD-000001         remove photo
+    POST   /productos/reservar    body: {order_id, items: [{product_id, qty}]}
+                                  ATOMIC: discount the stock of the whole order (TransactWriteItems)
+    POST   /productos/liberar     body: {order_id}
+                                  ATOMIC: give the stock of a cancelled order back, only once
 
 Security: every route that WRITES requires the header `x-api-key` equal to the
 Lambda variable MARKETPLACE_API_KEY (constant-time compare). If it is not
@@ -30,10 +34,13 @@ import os
 from Implementation.ProductServiceImplementation.ProductImageStore import S3ImageStore
 from Implementation.ProductServiceImplementation.ProductServiceImplementation import \
     ProductServiceImplementation
-from Interfaces.ProductServiceInterface.ProductDTO import (IMAGE_TYPES, MAX_IMAGE_BYTES, ProductItem,
-                                                           image_type)
+from Interfaces.ProductServiceInterface.ProductDTO import (IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_LINE_QTY,
+                                                           MAX_RESERVATION_PRODUCTS, ORDER_ID_RE,
+                                                           ProductItem, image_type)
 from Interfaces.ProductServiceInterface.ProductServiceInterface import (ImagesDisabled, OutOfStock,
-                                                                        ProductExists, ProductNotFound)
+                                                                        ProductExists, ProductNotFound,
+                                                                        ReservationExists,
+                                                                        ReservationNotFound)
 from Interfaces.Validators import PRODUCT_ID_RE, SLUG_RE, ValidationError, parse_int
 from Services.LambdaCommon import (api_key_configured, authorized, get_table, gsi_name,
                                    json_body, log, parse_request, response)
@@ -47,12 +54,16 @@ PRODUCT_DELETE = "/productos/eliminar"
 PRODUCT_STOCK = "/productos/stock"
 PRODUCT_LOAD = "/productos/cargar"
 PRODUCT_IMAGE = "/productos/imagen"
+PRODUCT_RESERVE = "/productos/reservar"
+PRODUCT_RELEASE = "/productos/liberar"
 PRODUCT_ROUTES = {
     (PRODUCT_QUERY, "GET"), (PRODUCT_ADD, "POST"), (PRODUCT_UPDATE, "PUT"),
     (PRODUCT_DELETE, "DELETE"), (PRODUCT_STOCK, "POST"), (PRODUCT_LOAD, "POST"),
     (PRODUCT_IMAGE, "POST"), (PRODUCT_IMAGE, "DELETE"),
+    (PRODUCT_RESERVE, "POST"), (PRODUCT_RELEASE, "POST"),
 }
-PRODUCT_WRITE_ROUTES = {PRODUCT_ADD, PRODUCT_UPDATE, PRODUCT_DELETE, PRODUCT_STOCK, PRODUCT_LOAD, PRODUCT_IMAGE}
+PRODUCT_WRITE_ROUTES = {PRODUCT_ADD, PRODUCT_UPDATE, PRODUCT_DELETE, PRODUCT_STOCK, PRODUCT_LOAD, PRODUCT_IMAGE,
+                        PRODUCT_RESERVE, PRODUCT_RELEASE}
 
 _product_service = None
 
@@ -74,6 +85,32 @@ def default_product_service():
     if _product_service is None:
         _product_service = ProductServiceImplementation(get_table(), gsi_name(), images=default_image_store())
     return _product_service
+
+
+def _order_id(value):
+    value = str(value or "")
+    if not ORDER_ID_RE.fullmatch(value):
+        raise ValidationError("order_id must be the order number (digits only).")
+    return value
+
+
+def _quantities(raw):
+    """[{product_id, qty}] -> {product_id: total qty}. The same product can come in
+    several lines (sizes/colors) but a transaction may touch each item only once."""
+    if not isinstance(raw, list) or not raw:
+        raise ValidationError("items must be a non-empty list.")
+    out = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise ValidationError("Each item must be an object {product_id, qty}.")
+        qty = entry.get("qty")
+        if not isinstance(qty, int) or isinstance(qty, bool) or not 1 <= qty <= MAX_LINE_QTY:
+            raise ValidationError(f"qty must be a whole number from 1 to {MAX_LINE_QTY}.")
+        product_id = _product_id(entry.get("product_id"))
+        out[product_id] = out.get(product_id, 0) + qty
+    if len(out) > MAX_RESERVATION_PRODUCTS:
+        raise ValidationError(f"At most {MAX_RESERVATION_PRODUCTS} different products per order.")
+    return out
 
 
 def _photo(data):
@@ -149,6 +186,14 @@ def handle_productos(event, context=None, service=None):
             return response(200, {"product_id": product_id, "image_url": url})
 
         data = json_body(body)
+        if route == PRODUCT_RESERVE:
+            order_id = _order_id(data.get("order_id"))
+            stock = svc.reserve_stock(order_id, _quantities(data.get("items")))
+            return response(200, {"order_id": order_id, "stock": stock})
+        if route == PRODUCT_RELEASE:
+            order_id = _order_id(data.get("order_id"))
+            released, stock = svc.release_stock(order_id)
+            return response(200, {"order_id": order_id, "released": released, "stock": stock})
         if route == PRODUCT_ADD:
             item = ProductItem.from_payload(data)
             svc.create(item)
@@ -180,6 +225,10 @@ def handle_productos(event, context=None, service=None):
         return response(409, {"error": str(e), "code": "EXISTS"})
     except ProductNotFound as e:
         return response(404, {"error": str(e), "code": "NOT_FOUND"})
+    except ReservationExists as e:
+        return response(409, {"error": str(e), "code": "RESERVED"})
+    except ReservationNotFound as e:
+        return response(404, {"error": str(e), "code": "NO_RESERVATION"})
     except ImagesDisabled as e:
         return response(503, {"error": str(e), "code": "IMAGES_DISABLED"})
     except ValidationError as e:

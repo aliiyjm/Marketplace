@@ -89,6 +89,8 @@ Todas apuntan a la misma Lambda. Las de usuarios ya las tienes; agrega las de pr
 | POST | `/productos/cargar` | sí |
 | POST | `/productos/imagen` (foto a S3, ver [FOTOS_S3.md](FOTOS_S3.md)) | sí |
 | DELETE | `/productos/imagen` (`?product_id=`) | sí |
+| POST | `/productos/reservar` (transacción atómica: descuenta el stock del pedido, ver [STORED_PROCEDURES.md](STORED_PROCEDURES.md)) | sí |
+| POST | `/productos/liberar` (transacción atómica: devuelve el stock de un pedido cancelado) | sí |
 | GET | `/carrito/consultar` (`?id_user=`) | sí |
 | PUT | `/carrito/guardar` | sí |
 | DELETE | `/carrito/vaciar` (`?id_user=`) | sí |

@@ -20,6 +20,8 @@ ROUTE_DELETE = "/productos/eliminar"
 ROUTE_STOCK = "/productos/stock"
 ROUTE_LOAD = "/productos/cargar"
 ROUTE_IMAGE = "/productos/imagen"
+ROUTE_RESERVE = "/productos/reservar"
+ROUTE_RELEASE = "/productos/liberar"
 IMAGE_TIMEOUT = 30   # same as the Lambda timeout: S3 upload + DynamoDB write
 
 
@@ -114,6 +116,14 @@ class ProductApiClient:
         body = {"product_id": product_id, "content_type": content_type,
                 "data": base64.b64encode(data).decode("ascii")}
         return self._call("POST", ROUTE_IMAGE, write=True, timeout=IMAGE_TIMEOUT, json=body)["image_url"]
+
+    def reserve(self, order_id, items):
+        """Atomic stock discount of a whole order. Returns {product_id: new_stock}."""
+        return self._call("POST", ROUTE_RESERVE, write=True, json={"order_id": str(order_id), "items": items})["stock"]
+
+    def release(self, order_id):
+        """Atomic, once-only stock return of a cancelled order: {released, stock}."""
+        return self._call("POST", ROUTE_RELEASE, write=True, json={"order_id": str(order_id)})
 
     def delete_image(self, product_id):
         return self._call("DELETE", ROUTE_IMAGE, write=True, timeout=IMAGE_TIMEOUT, params={"product_id": product_id})

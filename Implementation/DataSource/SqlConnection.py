@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
 
-from Interfaces.DataInterfaces.RepositoryErrors import DatabaseUnavailable, DuplicateKey
+from Interfaces.DataInterfaces.RepositoryErrors import DatabaseUnavailable, DuplicateKey, ProcedureError
 from Interfaces.Validators import ValidationError
 
 log = logging.getLogger("sql")
@@ -25,6 +25,8 @@ log = logging.getLogger("sql")
 
 # Common driver messages -> what to check (shown only in the console).
 _HINTS = (
+    (("procedure", "function"),
+     "a stored procedure/function is missing: install them with  python scripts/install_procedures.py"),
     (("access denied", "password authentication failed", "authentication"),
      "check the user and password in .env ({prefix}_USER / {prefix}_PASSWORD)"),
     (("unknown database", "does not exist"),
@@ -42,6 +44,18 @@ def explain(error, dialect):
         if any(w in text.lower() for w in words):
             return f"{text}  ->  {hint.format(prefix=prefix)}"
     return text
+
+
+def procedure_code(error):
+    """Short code of a business error raised inside a stored routine, or None.
+    MySQL: SIGNAL SQLSTATE '45000' -> error 1644. PostgreSQL: RAISE EXCEPTION -> P0001."""
+    args = getattr(error, "args", ())
+    if len(args) >= 2 and args[0] == 1644:
+        return str(args[1])
+    if getattr(error, "sqlstate", None) == "P0001":
+        diag = getattr(error, "diag", None)
+        return str(getattr(diag, "message_primary", "") or error)
+    return None
 
 
 def _is_integrity_error(error):
@@ -77,6 +91,16 @@ class Cursor:
         rows = self.fetchall()
         return rows[0] if rows else None
 
+    def call(self, sql, params=()):
+        """Run CALL/SELECT of a stored routine: rows of its first result set.
+        MySQL sends extra result sets after a CALL: they are read and dropped,
+        otherwise the connection would refuse the next command."""
+        rows = self.execute(sql, params).fetchall()
+        nextset = getattr(self._cursor, "nextset", None)
+        while nextset and nextset():
+            pass
+        return rows
+
     @property
     def rowcount(self):
         return self._cursor.rowcount
@@ -110,6 +134,10 @@ class SqlDatabase:
             raise
         except Exception as e:
             conn.rollback()
+            code = procedure_code(e)
+            if code:                     # business rule of a stored procedure, not a failure
+                log.info("Procedure on %s refused: %s", self.label, code)
+                raise ProcedureError(code) from None
             if _is_integrity_error(e):
                 log.warning("Integrity error on %s: %r", self.label, e)
                 raise DuplicateKey("That record already exists.") from None

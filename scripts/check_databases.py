@@ -3,7 +3,8 @@ the expected tables and columns. Run it on your computer before starting the app
 
     python scripts/check_databases.py
 
-It only READS (SELECT ... WHERE 1 = 0 and COUNT(*)); it never changes data.
+It only READS (SELECT ... WHERE 1 = 0, COUNT(*) and the list of stored
+procedures); it never changes data.
 """
 import os
 import sys
@@ -60,6 +61,33 @@ def check_sql(db, tables, out=print):
     return problems
 
 
+def check_routines(db, out=print):
+    """The stored procedures/functions the app calls must exist."""
+    from scripts.install_procedures import missing_routines
+    try:
+        missing = missing_routines(db)
+    except Exception as e:
+        out(f"  ✗ stored procedures: {getattr(e, 'detail', '') or e}")
+        return 1
+    if missing:
+        out(f"  ✗ missing stored procedures: {', '.join(missing)}  ->  python scripts/install_procedures.py")
+        return 1
+    out("  ✓ stored procedures installed")
+    return 0
+
+
+def _release_route(client):
+    """POST /productos/liberar of an order that does not exist: changes nothing.
+    404 NO_RESERVATION means the Lambda route works."""
+    from View.MainViews.Utils.product_api import ProductApiError
+    try:
+        client.release("0")
+    except ProductApiError as e:
+        if e.code == "NO_RESERVATION":
+            return
+        raise
+
+
 def check_api(out=print):
     from View.MainViews.Utils.product_api import ProductApiClient, ProductApiError
     from View.MainViews.Utils.quick_api import QuickApiClient
@@ -70,6 +98,7 @@ def check_api(out=print):
         ("products  GET /productos/consultar", lambda: client.list_page(limit=1)),
         ("users     GET /usuarios/consultar", lambda: api_client.get_user("u-ana00001")),
         ("carts     GET /carrito/consultar", lambda: QuickApiClient().get_cart("u-ana00001")),
+        ("stock     POST /productos/liberar (atomic transactions)", lambda: _release_route(client)),
     ]
     for label, call in checks:
         try:
@@ -93,10 +122,14 @@ def main():
         print("  (everything is 'memory': the app is not using any database; check your .env)")
     if backends["FINANCE_BACKEND"] == "mysql":
         print(f"MySQL {os.environ.get('MYSQL_DATABASE', 'finance_db')} @ {os.environ.get('MYSQL_HOST', 'localhost')}")
-        problems += check_sql(mysql_from_env(), FINANCE_TABLES)
+        db = mysql_from_env()
+        found = check_sql(db, FINANCE_TABLES)
+        problems += found or check_routines(db)
     if backends["OPERATIONS_BACKEND"] == "postgres":
         print(f"PostgreSQL {os.environ.get('PG_DATABASE', 'operations_db')} @ {os.environ.get('PG_HOST', 'localhost')}")
-        problems += check_sql(postgres_from_env(), OPERATIONS_TABLES)
+        db = postgres_from_env()
+        found = check_sql(db, OPERATIONS_TABLES)
+        problems += found or check_routines(db)
     if "aws" in (backends["DATA_BACKEND"], backends["PRODUCTS_BACKEND"]):
         print("API Gateway + Lambda (DynamoDB MarketplaceDB)")
         problems += check_api()

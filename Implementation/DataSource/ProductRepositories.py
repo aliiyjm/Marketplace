@@ -14,7 +14,8 @@ from Interfaces.ProductServiceInterface.ProductDTO import IMAGE_KEY_RE, ProductI
 from Interfaces.ProductServiceInterface.ProductServiceInterface import (ImagesDisabled, OutOfStock,
                                                                         ProductExists, ProductNotFound,
                                                                         ProductRepositoryInterface,
-                                                                        ProductStoreError)
+                                                                        ProductStoreError,
+                                                                        ReservationExists)
 from Interfaces.Validators import ValidationError
 
 log = logging.getLogger("products")
@@ -27,6 +28,31 @@ class MemoryProductRepository(ProductRepositoryInterface):
     def __init__(self, store):
         self.store = store
         self.images = {}              # key -> (content_type, bytes)
+        self.reservations = {}        # order_id -> {"status": RESERVED|RELEASED, "items": {pid: qty}}
+
+    def reserve_stock(self, order_id, quantities):
+        """Same all-or-nothing rules as the DynamoDB transaction (callers hold store.lock)."""
+        key = str(order_id)
+        if key in self.reservations:
+            raise ReservationExists(f"Order {order_id} already has a reservation.")
+        for product_id, qty in quantities.items():
+            p = self.store.products.get(product_id)
+            if p is None:
+                raise ProductNotFound("Product not found.")
+            if p["stock"] < qty:
+                raise OutOfStock(f"Only {p['stock']} left of {p['name']}.")
+        self.reservations[key] = {"status": "RESERVED", "items": dict(quantities)}
+        return {pid: self.store.products[pid]["stock"] - qty for pid, qty in quantities.items()}
+
+    def release_stock(self, order_id):
+        reservation = self.reservations.get(str(order_id))
+        if reservation is None:
+            return None
+        if reservation["status"] != "RESERVED":
+            return {}
+        reservation["status"] = "RELEASED"
+        return {pid: self.store.products[pid]["stock"] + qty for pid, qty in reservation["items"].items()
+                if pid in self.store.products}
 
     def load_all(self):
         return list(self.store.products.values())
@@ -91,6 +117,8 @@ class ApiProductRepository(ProductRepositoryInterface):
             return ProductNotFound(message)
         if code == "EXISTS":
             return ProductExists(message)
+        if code == "RESERVED":
+            return ReservationExists(message)
         if code == "IMAGES_DISABLED":
             return ImagesDisabled("Photos are not enabled yet: set MARKETPLACE_BUCKET in the Lambda.")
         return ProductStoreError(message if getattr(error, "status", None) == 400 else default)
@@ -142,6 +170,22 @@ class ApiProductRepository(ProductRepositoryInterface):
             self.client.delete_image(product_id)
         except self.client.Error as e:
             raise self._translate(e, "Could not remove the photo. Try again.") from None
+
+    def reserve_stock(self, order_id, quantities):
+        items = [{"product_id": pid, "qty": int(qty)} for pid, qty in quantities.items()]
+        try:
+            return {pid: int(n) for pid, n in self.client.reserve(order_id, items).items()}
+        except self.client.Error as e:
+            raise self._translate(e, "Could not reserve the stock. Try again.") from None
+
+    def release_stock(self, order_id):
+        try:
+            data = self.client.release(order_id)
+        except self.client.Error as e:
+            if getattr(e, "code", None) == "NO_RESERVATION":
+                return None
+            raise self._translate(e, "Could not return the stock. Try again.") from None
+        return {pid: int(n) for pid, n in data.get("stock", {}).items()}
 
 
 def sync_catalog(store, repo):

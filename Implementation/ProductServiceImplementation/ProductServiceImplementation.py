@@ -9,21 +9,60 @@ below zero, so two buyers cannot get the last unit at the same time.
 Photos: the file goes to the image store (S3) first and only then its URL is
 written in the item; if that write fails the new file is deleted again, so the
 table never points to a missing photo.
+
+Atomic transactions (TransactWriteItems, all-or-nothing, run by DynamoDB):
+  1. reserve_stock: discount EVERY product of an order + write its reservation.
+     If one product lacks stock nothing changes. The reservation key is the
+     order number, so two checkouts can never use the same number.
+  2. release_stock: reservation RESERVED -> RELEASED + give EVERY product its
+     stock back. The condition on the status makes it happen only once, even
+     if two admins cancel the same order at the same moment.
 """
 import base64
 import binascii
 import json
 import logging
 import secrets
+from datetime import datetime, timezone
+from decimal import Decimal
 
-from Interfaces.ProductServiceInterface.ProductDTO import (IMAGE_TYPES, PK_PREFIX, SK_PRODUCT,
-                                                           ProductItem, image_key)
+from Interfaces.ProductServiceInterface.ProductDTO import (IMAGE_TYPES, PK_PREFIX,
+                                                           RESERVATION_PREFIX, SK_PRODUCT,
+                                                           SK_RESERVATION, ProductItem, image_key)
 from Interfaces.ProductServiceInterface.ProductServiceInterface import (ImagesDisabled, OutOfStock,
                                                                         ProductExists, ProductNotFound,
-                                                                        ProductServiceInterface)
+                                                                        ProductServiceInterface,
+                                                                        ReservationExists,
+                                                                        ReservationNotFound)
 from Interfaces.Validators import ValidationError
 
 image_log = logging.getLogger("product_images")
+
+
+def to_attribute(value):
+    """Python value -> DynamoDB low-level attribute ({"S": ...}, {"N": ...}),
+    the format TransactWriteItems needs (the Table resource does it for us elsewhere)."""
+    if isinstance(value, bool):
+        return {"BOOL": value}
+    if value is None:
+        return {"NULL": True}
+    if isinstance(value, str):
+        return {"S": value}
+    if isinstance(value, (int, Decimal)):
+        return {"N": str(value)}
+    if isinstance(value, dict):
+        return {"M": {str(k): to_attribute(v) for k, v in value.items()}}
+    if isinstance(value, (list, tuple)):
+        return {"L": [to_attribute(v) for v in value]}
+    raise TypeError(f"Unsupported value for DynamoDB: {type(value).__name__}")
+
+
+def cancellation_codes(error):
+    """['None', 'ConditionalCheckFailed', ...] of a TransactionCanceledException, or None."""
+    response = getattr(error, "response", {}) or {}
+    if response.get("Error", {}).get("Code") != "TransactionCanceledException":
+        return None
+    return [reason.get("Code", "None") for reason in response.get("CancellationReasons", [])]
 
 MAX_PAGE = 2000
 MAX_STOCK_DELTA = 10000
@@ -199,3 +238,82 @@ class ProductServiceImplementation(ProductServiceInterface):
                 raise ProductNotFound(f"Product {product_id} does not exist.") from None
             raise
         self._delete_old(current.image_url)
+
+    # ---------- atomic stock transactions ----------
+    @staticmethod
+    def _reservation_key(order_id):
+        return {"PK": RESERVATION_PREFIX + str(order_id), "SK": SK_RESERVATION}
+
+    def _transact(self, actions):
+        """One TransactWriteItems call (all actions succeed or none is applied)."""
+        self.table.meta.client.transact_write_items(TransactItems=actions)
+
+    def _update(self, key, expression, condition, values, names=None):
+        update = {"TableName": self.table.name, "Key": {k: to_attribute(v) for k, v in key.items()},
+                  "UpdateExpression": expression, "ConditionExpression": condition,
+                  "ExpressionAttributeValues": {k: to_attribute(v) for k, v in values.items()}}
+        if names:
+            update["ExpressionAttributeNames"] = names
+        return {"Update": update}
+
+    def _stocks(self, product_ids):
+        out = {}
+        for product_id in product_ids:
+            item = self.table.get_item(Key=self._key(product_id), ConsistentRead=True).get("Item")
+            if item:
+                out[product_id] = int(item["stock"])
+        return out
+
+    def reserve_stock(self, order_id, quantities):
+        products = sorted(quantities)
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        reservation = dict(self._reservation_key(order_id), entity="STOCK_RESERVATION", order_id=str(order_id),
+                           status="RESERVED", items={pid: quantities[pid] for pid in products}, created_at=now)
+        actions = [{"Put": {"TableName": self.table.name,
+                            "Item": {k: to_attribute(v) for k, v in reservation.items()},
+                            "ConditionExpression": "attribute_not_exists(PK)"}}]
+        for product_id in products:
+            actions.append(self._update(self._key(product_id), "SET stock = stock - :q",
+                                        "attribute_exists(PK) AND stock >= :q", {":q": quantities[product_id]}))
+        try:
+            self._transact(actions)
+        except Exception as e:
+            codes = cancellation_codes(e)
+            if codes is None:
+                raise
+            if codes and codes[0] == "ConditionalCheckFailed":
+                raise ReservationExists(f"Order {order_id} already has a reservation.") from None
+            for product_id, code in zip(products, codes[1:]):
+                if code == "ConditionalCheckFailed":
+                    current = self.get(product_id)
+                    if current is None:
+                        raise ProductNotFound(f"Product {product_id} does not exist.") from None
+                    raise OutOfStock(f"Only {current.stock} left of {current.name}.") from None
+            raise ValidationError("The stock is busy right now. Please try again.") from None
+        return self._stocks(products)
+
+    def release_stock(self, order_id):
+        key = self._reservation_key(order_id)
+        reservation = self.table.get_item(Key=key, ConsistentRead=True).get("Item")
+        if not reservation:
+            raise ReservationNotFound(f"Order {order_id} has no stock reservation.")
+        items = {pid: int(qty) for pid, qty in reservation.get("items", {}).items()}
+        if reservation.get("status") != "RESERVED":
+            return False, {}
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        actions = [self._update(key, "SET #st = :released, released_at = :now", "#st = :reserved",
+                                {":released": "RELEASED", ":reserved": "RESERVED", ":now": now},
+                                names={"#st": "status"})]
+        for product_id in sorted(items):
+            actions.append(self._update(self._key(product_id), "SET stock = stock + :q",
+                                        "attribute_exists(PK)", {":q": items[product_id]}))
+        try:
+            self._transact(actions)
+        except Exception as e:
+            codes = cancellation_codes(e)
+            if codes is None:
+                raise
+            if codes and codes[0] == "ConditionalCheckFailed":
+                return False, {}                    # someone released it a moment ago
+            raise ValidationError("The stock could not be returned right now. Please try again.") from None
+        return True, self._stocks(sorted(items))

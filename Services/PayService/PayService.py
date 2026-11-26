@@ -21,6 +21,9 @@ class PayService:
         status, q = self._filters(args)
         return self.impl.list_orders(user_id, status, q), status, q
 
+    def my_history(self, user_id):
+        return self.impl.sales_history(user_id)
+
     def my_order(self, user_id, order_id):
         return self.impl.get_order(order_id, user_id=user_id)
 

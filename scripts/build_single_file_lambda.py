@@ -19,6 +19,7 @@ SOURCES = [
     ("Interfaces/UserServiceInterface/UserDTO.py", {"ROLES"}),
     ("Interfaces/ProductServiceInterface/ProductServiceInterface.py",
      {"ProductStoreError", "OutOfStock", "ProductNotFound", "ProductExists", "ImagesDisabled",
+      "ReservationExists", "ReservationNotFound",
       "ProductImageStoreInterface", "ProductServiceInterface"}),
     ("Interfaces/ProductServiceInterface/ProductDTO.py", None),
     ("Interfaces/UserServiceInterface/UserItem.py", None),
