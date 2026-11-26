@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "marketplace",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["View/MainViews/PY/app.py"],
+      "port": 5000
+    },
+    {
+      "name": "marketplace-demo",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["View/MainViews/PY/app.py"],
+      "env": { "MARKETPLACE_ENV_FILE": "none" },
+      "port": 5000
+    }
+  ]
+}
