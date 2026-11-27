@@ -21,7 +21,7 @@ from scripts.load_to_dynamo import build_payloads, upload
 from Services.ProductService.ProductService import handle_productos as lambda_handler
 from Services.ServiceContainer import build_services
 from tests.conftest import ANA, some_product
-from tests.fake_dynamo import FakeTable, LambdaHttp
+from tests.fake_dynamo import FakeTable, LambdaHttp, auth
 from View.MainViews.Utils.product_api import ProductApiClient
 
 KEY = "tx-key-123"
@@ -64,7 +64,7 @@ def lam(request, table):
 
 def call(service, path, body, key=KEY):
     event = {"rawPath": path, "requestContext": {"http": {"method": "POST"}},
-             "headers": {"x-api-key": key} if key else {}, "body": json.dumps(body)}
+             "headers": auth(key), "body": json.dumps(body)}
     out = service._handler(event, service=service)
     return out["statusCode"], json.loads(out["body"])
 
@@ -155,8 +155,8 @@ def test_bad_reservations_are_rejected(lam, table, body):
 
 def test_stock_routes_need_the_api_key(lam, table):
     assert call(lam, "/productos/reservar", {"order_id": "10001", "items": [{"product_id": A, "qty": 1}]},
-                key="wrong")[0] == 403
-    assert call(lam, "/productos/liberar", {"order_id": "10001"}, key=None)[0] == 403
+                key="wrong")[0] == 401
+    assert call(lam, "/productos/liberar", {"order_id": "10001"}, key=None)[0] == 401
     assert table.meta.client.transactions == 0
 
 

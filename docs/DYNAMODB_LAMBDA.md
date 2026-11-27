@@ -100,7 +100,9 @@ Todas apuntan a la misma Lambda. Las de usuarios ya las tienes; agrega las de pr
 Recomendado: en **Throttling** pon un límite (por ejemplo 50 solicitudes/s, ráfaga 100).
 
 Prueba en Postman: `GET {tu-url}/productos/consultar?limit=5` → `{"items": [], "next_cursor": null}`.
-Si haces `GET {tu-url}/usuarios/consultar` sin el encabezado `x-api-key`, debe responder **403**.
+Todas las rutas piden un **token JWT** (`Authorization: Bearer <token>`). Genera uno con
+`python scripts/make_token.py` (solo lectura) o `--scope "read write"`; sin token la Lambda responde **401**
+y con un token de solo lectura en una ruta que escribe responde **403**.
 
 ## 5. Sube los usuarios de prueba y las 17,000 prendas
 

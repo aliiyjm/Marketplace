@@ -16,7 +16,7 @@ from scripts.build_single_file_lambda import OUT as SINGLE_FILE
 from scripts.load_to_dynamo import build_payloads, build_users, upload, upload_users
 from Services.LambdaRouter import lambda_handler as layered_router
 from Services.ServiceContainer import build_services
-from tests.fake_dynamo import FakeTable, RouterHttp
+from tests.fake_dynamo import FakeTable, RouterHttp, auth
 from View.MainViews.PY.app import create_app
 from View.MainViews.Utils import api_client
 from View.MainViews.Utils.product_api import ProductApiClient
@@ -58,7 +58,7 @@ def lam(request):
 def call(lam, method, path, query=None, body=None, key=KEY):
     handler, products, users, _, carts, favorites = lam
     event = {"rawPath": path, "requestContext": {"http": {"method": method}},
-             "headers": {"x-api-key": key} if key else {}, "queryStringParameters": query,
+             "headers": auth(key), "queryStringParameters": query,
              "body": json.dumps(body) if body is not None else None}
     out = handler(event, None, products=products, users=users, carts=carts, favorites=favorites)
     return out["statusCode"], json.loads(out["body"]) if out["body"] else None
@@ -73,8 +73,8 @@ def user(**over):
 
 # ---------- users ----------
 def test_users_routes_require_the_key(lam, monkeypatch):
-    assert call(lam, "GET", "/usuarios/consultar", key=None)[0] == 403
-    assert call(lam, "POST", "/usuarios/agregar", body=user(), key="nope")[0] == 403
+    assert call(lam, "GET", "/usuarios/consultar", key=None)[0] == 401
+    assert call(lam, "POST", "/usuarios/agregar", body=user(), key="nope")[0] == 401
     monkeypatch.delenv("MARKETPLACE_API_KEY")
     assert call(lam, "GET", "/usuarios/consultar")[0] == 503
 
@@ -127,7 +127,7 @@ LINE = {"line_id": "0123456789ab", "product_id": "PRD-000001", "size": "M", "col
 
 
 def test_cart_routes(lam):
-    assert call(lam, "GET", "/carrito/consultar", {"id_user": "a1b2c3d4e5"}, key=None)[0] == 403
+    assert call(lam, "GET", "/carrito/consultar", {"id_user": "a1b2c3d4e5"}, key=None)[0] == 401
     status, body = call(lam, "GET", "/carrito/consultar", {"id_user": "a1b2c3d4e5"})
     assert status == 200 and body["lines"] == []
     assert call(lam, "PUT", "/carrito/guardar", body={"id_user": "a1b2c3d4e5", "lines": [LINE]})[0] == 200
@@ -156,7 +156,7 @@ def test_cart_line_limit_and_extra_fields(lam):
 
 def test_favorites_routes(lam):
     items = {"PRD-000001": "2026-11-20T10:00:00", "PRD-000002": "2026-11-21T10:00:00"}
-    assert call(lam, "PUT", "/favoritos/guardar", body={"id_user": "a1b2c3d4e5", "items": items}, key=None)[0] == 403
+    assert call(lam, "PUT", "/favoritos/guardar", body={"id_user": "a1b2c3d4e5", "items": items}, key=None)[0] == 401
     assert call(lam, "PUT", "/favoritos/guardar", body={"id_user": "a1b2c3d4e5", "items": items})[0] == 200
     assert lam[3].items[("FAV#a1b2c3d4e5", "FAV")]["items"] == items
     assert call(lam, "GET", "/favoritos/consultar", {"id_user": "a1b2c3d4e5"})[1]["items"] == items
@@ -169,7 +169,7 @@ def test_users_and_products_share_the_table_without_mixing(lam):
     call(lam, "POST", "/usuarios/agregar", body=user())
     assert call(lam, "POST", "/productos/agregar", body=payload)[0] == 201
     assert len(lam[3].items) == 2
-    status, body = call(lam, "GET", "/productos/consultar", {"limit": "10"}, key=None)
+    status, body = call(lam, "GET", "/productos/consultar", {"limit": "10"})
     assert [p["product_id"] for p in body["items"]] == [payload["product_id"]]
     status, body = call(lam, "GET", "/usuarios/consultar")
     assert [u["id_user"] for u in body] == ["a1b2c3d4e5"]
@@ -190,6 +190,7 @@ def aws_app(monkeypatch):
     monkeypatch.setattr(api_client, "requests", types.SimpleNamespace(
         request=http.request, RequestException=requests.RequestException))
     monkeypatch.setattr(api_client, "API_KEY", KEY)
+    monkeypatch.setattr(api_client, "API_URL", "https://api.example.test")
     client = ProductApiClient(base_url="https://api.example.test", api_key=KEY, http=http)
     from Implementation.DataSource.MemoryStore import MemoryStore
     from Implementation.DataSource.Seed import seed

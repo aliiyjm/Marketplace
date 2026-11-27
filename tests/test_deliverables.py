@@ -129,7 +129,9 @@ def test_openapi_is_valid_and_uses_the_code_rules():
     assert schemas["ProductId"]["pattern"] == same(PRODUCT_ID_RE)
     assert schemas["UserId"]["pattern"] == same(USER_ID_RE)
     assert schemas["OrderId"]["pattern"] == same(ORDER_ID_RE)
-    assert spec["components"]["securitySchemes"]["ApiKey"]["name"] == "x-api-key"
+    scheme = spec["components"]["securitySchemes"]["BearerJWT"]
+    assert scheme["scheme"] == "bearer" and scheme["bearerFormat"] == "JWT" and spec["security"] == [{"BearerJWT": []}]
+    assert all("401" in op["responses"] for item in spec["paths"].values() for op in item.values())
     assert "i4rsywszmf" not in (ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8")   # no real endpoint
 
 
@@ -139,7 +141,7 @@ def test_real_lambda_responses_match_the_openapi_schemas(monkeypatch):
         ProductServiceImplementation
     from scripts.load_to_dynamo import build_payloads
     from Services.ProductService.ProductService import handle_productos
-    from tests.fake_dynamo import FakeTable
+    from tests.fake_dynamo import FakeTable, auth
     monkeypatch.setenv("MARKETPLACE_API_KEY", "k")
     spec = _spec()
     svc = ProductServiceImplementation(FakeTable())
@@ -147,7 +149,7 @@ def test_real_lambda_responses_match_the_openapi_schemas(monkeypatch):
 
     def call(method, path, body=None, query=None):
         out = handle_productos({"rawPath": path, "requestContext": {"http": {"method": method}},
-                                "headers": {"x-api-key": "k"}, "queryStringParameters": query,
+                                "headers": auth("k"), "queryStringParameters": query,
                                 "body": json.dumps(body) if body is not None else None}, service=svc)
         return out["statusCode"], json.loads(out["body"])
 

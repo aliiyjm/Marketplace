@@ -25,7 +25,7 @@ flowchart LR
 
     user -- "HTTPS / HTML" --> flask
     user -. "GET de fotos" .-> s3
-    flask -- "HTTPS + x-api-key<br/>(requests)" --> apigw
+    flask -- "HTTPS + JWT Bearer (60 s)<br/>(requests)" --> apigw
     apigw -- "AWS_PROXY" --> lambda
     lambda -- "GetItem, Query, Scan,<br/>TransactWriteItems" --> ddb
     lambda -- "PutObject / DeleteObject" --> s3
@@ -36,7 +36,7 @@ flowchart LR
 
 | Componente | Configuración | Por qué |
 |---|---|---|
-| **API Gateway** (HTTP API) | 19 rutas, todas a la misma integración de la Lambda, etapa con auto-deploy, **límite de 50 peticiones/s (ráfagas de 100)** | Un solo punto de entrada a DynamoDB/S3; la app no guarda credenciales de AWS |
+| **API Gateway** (HTTP API) | 19 rutas, **todas exigen un JWT**, todas a la misma integración de la Lambda, etapa con auto-deploy, **límite de 50 peticiones/s (ráfagas de 100)** | Un solo punto de entrada a DynamoDB/S3; la app no guarda credenciales de AWS |
 | **Lambda** `CRUD_Marketplace` | Python, **256 MB**, timeout 30 s, rol **LabRole**, variables `MARKETPLACE_TABLE`, `MARKETPLACE_GSI`, `MARKETPLACE_API_KEY`, `MARKETPLACE_BUCKET` | Límite del lab: 128-256 MB; solo esta API puede invocarla |
 | **DynamoDB** `MarketplaceDB` | On-Demand, PK/SK + GSI1 | Catálogo masivo y transacciones rápidas; sin capacidad aprovisionada que gaste crédito |
 | **S3** | Bloqueo de ACLs, política de solo lectura de `products/*` | Las fotos se leen directo del bucket; subir y borrar solo lo hace la Lambda |
@@ -57,7 +57,7 @@ flowchart LR
 ```mermaid
 flowchart TB
     b["Navegador"] -->|"cookie de sesion HttpOnly + SameSite<br/>token CSRF en cada formulario<br/>CSP estricta, sin JS/CSS inline"| f["Flask"]
-    f -->|"x-api-key comparada en tiempo constante<br/>si la Lambda no tiene llave, rechaza todo"| a["API Gateway -> Lambda"]
+    f -->|"JWT HS256 firmado con la llave (la llave nunca viaja)<br/>caduca en 60 s, permisos read / write<br/>sin llave configurada la Lambda rechaza todo"| a["API Gateway -> Lambda"]
     a -->|"rol LabRole<br/>validacion de cada payload (DTOs)"| d[("DynamoDB / S3")]
     f -->|"usuario y contrasena en .env (no en Git)<br/>solo consultas con parametros %s"| r[("RDS MySQL / PostgreSQL")]
 ```

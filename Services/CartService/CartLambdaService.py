@@ -6,16 +6,17 @@
     GET    /favoritos/consultar?id_user=    {"id_user", "items": {product_id: added_at}}
     PUT    /favoritos/guardar               replace the favorites
 
-Carts and favorites are private: every route requires x-api-key
-(MARKETPLACE_API_KEY), which only the Flask backend has.
+Carts and favorites are private: every route requires a JWT service token
+signed with MARKETPLACE_API_KEY ("read" for GET, "write" for the rest), which
+only the Flask backend can make.
 """
 from Implementation.CartServiceImplementation.QuickDynamoImplementation import (CartDynamoImplementation,
                                                                                 FavDynamoImplementation)
 from Interfaces.CartServiceInterface.CartItem import CartItem
 from Interfaces.FavServiceInterface.FavItem import FavItem
 from Interfaces.Validators import USER_ID_RE, ValidationError
-from Services.LambdaCommon import (api_key_configured, authorized, get_table, json_body, log,
-                                   parse_request, response)
+from Services.LambdaCommon import (access_denied, get_table, json_body, log, parse_request,
+                                   response)
 
 QUICK_ROUTES = {("/carrito/consultar", "GET"), ("/carrito/guardar", "PUT"), ("/carrito/vaciar", "DELETE"),
                 ("/favoritos/consultar", "GET"), ("/favoritos/guardar", "PUT")}
@@ -45,10 +46,9 @@ def handle_rapidas(event, context=None, carts=None, favorites=None):
         return response(404, {"error": "Route not found."})
     if (route, method) not in QUICK_ROUTES:
         return response(405, {"error": "Method not allowed."})
-    if not api_key_configured():
-        return response(503, {"error": "MARKETPLACE_API_KEY is not configured in the Lambda."})
-    if not authorized(headers):
-        return response(403, {"error": "Forbidden."})
+    denied = access_denied(headers, "read" if method == "GET" else "write")
+    if denied:
+        return denied
     if carts is None or favorites is None:
         default_carts, default_favorites = default_quick_services()
         carts, favorites = carts or default_carts, favorites or default_favorites

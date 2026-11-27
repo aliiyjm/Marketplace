@@ -8,16 +8,16 @@
     DELETE /usuarios/eliminar?id_user=    delete
 
 Security: users are private data (emails, password hashes), so EVERY users
-route requires the x-api-key header (MARKETPLACE_API_KEY). Only the Flask
-backend has the key. Bodies are validated with UserItem (whitelisted fields,
+route requires a JWT service token signed with MARKETPLACE_API_KEY ("read"
+for GET, "write" for the rest). Only the Flask backend has the secret. Bodies are validated with UserItem (whitelisted fields,
 no plain-text passwords).
 """
 from Implementation.UserServiceImplementation.UserDynamoImplementation import (
     EmailTaken, UserDynamoImplementation, UserExists, UserNotFound)
 from Interfaces.UserServiceInterface.UserItem import UserItem
 from Interfaces.Validators import USER_ID_RE, ValidationError, valid_email
-from Services.LambdaCommon import (api_key_configured, authorized, get_table, gsi_name,
-                                   json_body, log, parse_request, response)
+from Services.LambdaCommon import (access_denied, get_table, gsi_name, json_body, log, parse_request,
+                                   response)
 
 USER_QUERY = "/usuarios/consultar"
 USER_ADD = "/usuarios/agregar"
@@ -49,10 +49,9 @@ def handle_usuarios(event, context=None, service=None):
         return response(404, {"error": "Route not found."})
     if (route, method) not in USER_ROUTES:
         return response(405, {"error": "Method not allowed."})
-    if not api_key_configured():
-        return response(503, {"error": "MARKETPLACE_API_KEY is not configured in the Lambda."})
-    if not authorized(headers):
-        return response(403, {"error": "Forbidden."})
+    denied = access_denied(headers, "read" if method == "GET" else "write")
+    if denied:
+        return denied
 
     svc = service or default_user_service()
     try:

@@ -26,6 +26,7 @@ SOURCES = [
     ("Interfaces/CartServiceInterface/CartDTO.py", {"MAX_LINES", "MAX_QTY_PER_LINE"}),
     ("Interfaces/CartServiceInterface/CartItem.py", None),
     ("Interfaces/FavServiceInterface/FavItem.py", None),
+    ("Interfaces/ServiceToken.py", None),
     ("Services/LambdaCommon.py", None),
     ("Implementation/ProductServiceImplementation/ProductImageStore.py", None),
     ("Implementation/ProductServiceImplementation/ProductServiceImplementation.py", None),
@@ -48,18 +49,19 @@ Items in MarketplaceDB:
     carts      PK=CART#<id_user>      SK=CART       lines=[{line_id, product_id, size, color, qty}]
     favorites  PK=FAV#<id_user>       SK=FAV        items={product_id: added_at}
 
-Routes:
-    /usuarios/consultar (GET)  agregar (POST)  modificar (PUT)  eliminar (DELETE)   -> key required
-    /productos/consultar (GET, public: active only)  agregar (POST)  modificar (PUT)
-    /productos/eliminar (DELETE)  stock (POST)  cargar (POST)                        -> key required
-    /productos/imagen (POST: upload photo to S3, DELETE: remove photo)              -> key required
-    /carrito/consultar (GET)  guardar (PUT)  vaciar (DELETE)                          -> key required
-    /favoritos/consultar (GET)  guardar (PUT)                                         -> key required
+Routes (every one needs a JWT service token: Authorization: Bearer <token>;
+GET routes need the "read" permission, the rest "write"):
+    /usuarios/consultar (GET)  agregar (POST)  modificar (PUT)  eliminar (DELETE)
+    /productos/consultar (GET)  agregar (POST)  modificar (PUT)  eliminar (DELETE)
+    /productos/stock (POST)  cargar (POST)  imagen (POST/DELETE: photo in S3)
+    /productos/reservar (POST)  liberar (POST)          atomic TransactWriteItems
+    /carrito/consultar (GET)  guardar (PUT)  vaciar (DELETE)
+    /favoritos/consultar (GET)  guardar (PUT)
 
 Environment variables of the Lambda:
     MARKETPLACE_TABLE    (default MarketplaceDB)
     MARKETPLACE_GSI      (default GSI1)
-    MARKETPLACE_API_KEY  secret shared with the Flask app (header x-api-key)
+    MARKETPLACE_API_KEY  secret shared with the Flask app; signs the JWT service tokens (Authorization: Bearer)
     MARKETPLACE_BUCKET   S3 bucket for product photos (optional; without it photos are disabled)
 Handler: lambda_function.lambda_handler
 """

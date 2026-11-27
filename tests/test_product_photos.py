@@ -26,7 +26,7 @@ from Services.ProductService.ProductService import MAX_IMAGE_BODY, default_image
 from Services.ProductService.ProductService import handle_productos as lambda_handler
 from Services.ServiceContainer import build_services
 from tests.conftest import CARLOS_SELLER, login, some_product, token
-from tests.fake_dynamo import FakeS3Client, FakeTable, LambdaHttp
+from tests.fake_dynamo import FakeS3Client, FakeTable, LambdaHttp, auth
 from View.MainViews.PY.app import create_app
 from View.MainViews.Utils.product_api import ProductApiClient
 
@@ -156,7 +156,7 @@ def lam(request, table):
 
 def event(method, path, *, query=None, body=None, key=KEY):
     return {"rawPath": path, "requestContext": {"http": {"method": method}},
-            "headers": {"x-api-key": key} if key else {}, "queryStringParameters": query,
+            "headers": auth(key), "queryStringParameters": query,
             "body": json.dumps(body) if body is not None else None}
 
 
@@ -175,8 +175,8 @@ def stored(table, pid="PRD-000001"):
 
 
 def test_photo_routes_need_the_api_key(lam):
-    assert call(lam, "POST", "/productos/imagen", body=photo_body(), key="wrong")[0] == 403
-    assert call(lam, "DELETE", "/productos/imagen", query={"product_id": "PRD-000001"}, key=None)[0] == 403
+    assert call(lam, "POST", "/productos/imagen", body=photo_body(), key="wrong")[0] == 401
+    assert call(lam, "DELETE", "/productos/imagen", query={"product_id": "PRD-000001"}, key=None)[0] == 401
     assert lam.s3.objects == {}
 
 
@@ -187,7 +187,7 @@ def test_upload_goes_to_s3_and_the_url_to_dynamodb(lam, table):
     key = body["image_url"][len(BASE):]
     obj = lam.s3.objects[(BUCKET, key)]
     assert obj["ContentType"] == "image/jpeg" and "immutable" in obj["CacheControl"]
-    status, product = call(lam, "GET", "/productos/consultar", query={"product_id": "PRD-000001"}, key=None)
+    status, product = call(lam, "GET", "/productos/consultar", query={"product_id": "PRD-000001"})
     assert product["image_url"] == body["image_url"]
 
 

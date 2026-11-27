@@ -3,15 +3,16 @@
 Environment variables of the Lambda:
     MARKETPLACE_TABLE    DynamoDB table (default MarketplaceDB)
     MARKETPLACE_GSI      global secondary index (default GSI1)
-    MARKETPLACE_API_KEY  secret shared with the Flask app (header x-api-key)
+    MARKETPLACE_API_KEY  secret shared with the Flask app: it SIGNS the JWT service tokens
+                         (Authorization: Bearer ...); the secret itself never travels
     MARKETPLACE_BUCKET   S3 bucket for product photos (optional: without it photos are disabled)
 """
 import base64
-import hmac
 import json
 import logging
 import os
 
+from Interfaces.ServiceToken import TokenError, bearer_token, verify_token
 from Interfaces.Validators import ValidationError
 
 log = logging.getLogger()
@@ -67,8 +68,34 @@ def api_key_configured():
     return bool(os.environ.get("MARKETPLACE_API_KEY"))
 
 
-def authorized(headers):
-    """Constant-time comparison of the x-api-key header with the Lambda secret."""
-    expected = os.environ.get("MARKETPLACE_API_KEY", "")
-    sent = str(headers.get("x-api-key", ""))
-    return bool(expected) and hmac.compare_digest(sent.encode(), expected.encode())
+def token_claims(headers):
+    """Claims of a valid JWT in Authorization: Bearer, or None (reason only in CloudWatch)."""
+    secret = os.environ.get("MARKETPLACE_API_KEY", "")
+    token = bearer_token(headers)
+    if not secret or not token:
+        return None
+    try:
+        return verify_token(token, secret)
+    except TokenError as e:
+        log.info("Rejected token: %s", e)
+        return None
+
+
+def authorized(headers, scope="write"):
+    """True when the request carries a valid token WITH that permission."""
+    claims = token_claims(headers)
+    return bool(claims) and scope in claims["scope"].split()
+
+
+def access_denied(headers, scope):
+    """None if the request may go on; otherwise the error response.
+    503 = the Lambda has no secret (fail closed), 401 = no valid token,
+    403 = valid token without the permission the route needs (RBAC)."""
+    if not api_key_configured():
+        return response(503, {"error": "MARKETPLACE_API_KEY is not configured in the Lambda."})
+    claims = token_claims(headers)
+    if claims is None:
+        return response(401, {"error": "Missing or invalid token."})
+    if scope not in claims["scope"].split():
+        return response(403, {"error": "Forbidden: the token lacks the '" + scope + "' permission."})
+    return None

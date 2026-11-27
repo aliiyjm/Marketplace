@@ -1,14 +1,17 @@
 """HTTP client for the products Lambda (API Gateway -> ProductService -> DynamoDB).
 
 Configuration (environment variables):
-    PRODUCTS_API_URL      API Gateway invoke URL (defaults to API_URL of api_client.py)
-    MARKETPLACE_API_KEY   same value as the Lambda's MARKETPLACE_API_KEY; needed for writes
+    PRODUCTS_API_URL      API Gateway invoke URL (defaults to API_URL in .env)
+    MARKETPLACE_API_KEY   same value as the Lambda's MARKETPLACE_API_KEY: it signs the JWT
+                          service token sent with every request (the secret never travels)
 """
 import base64
 import logging
 import os
 
 import requests
+
+from Interfaces.ServiceToken import auth_header
 
 log = logging.getLogger("product_api")
 TIMEOUT = 15   # the first page of a scan can take a few seconds
@@ -44,13 +47,14 @@ class ProductApiClient:
 
     def __init__(self, base_url=None, api_key=None, http=None):
         self.base_url = (base_url or default_base_url()).rstrip("/")
+        if not self.base_url:
+            raise RuntimeError("API_URL is not configured: set it in .env (API Gateway invoke URL).")
         self.api_key = api_key if api_key is not None else os.environ.get("MARKETPLACE_API_KEY", "")
         self.http = http or requests            # injectable for tests
 
     def _call(self, method, route, *, write=False, timeout=TIMEOUT, **kwargs):
-        # The key goes on every call: writes need it, and reads with it also
-        # return drafts (seller center). Without it the Lambda only shows active items.
-        headers = {"x-api-key": self.api_key} if self.api_key else {}
+        # A new JWT (60 s, permissions "read write") signed with the key, on every call.
+        headers = auth_header(self.api_key)
         try:
             resp = self.http.request(method, self.base_url + route, headers=headers, timeout=timeout, **kwargs)
         except requests.RequestException:
@@ -63,7 +67,7 @@ class ProductApiClient:
             log.warning("%s %s -> %s %s", method, route, resp.status_code, str(data)[:200])
             message = data.get("error") if isinstance(data, dict) else None
             if resp.status_code in (401, 403):
-                message = "The product API rejected the key. Check MARKETPLACE_API_KEY."
+                message = "The product API rejected the token. Check MARKETPLACE_API_KEY."
             elif resp.status_code == 503 or resp.status_code >= 500 or not message:
                 message = f"The product database answered with an error (HTTP {resp.status_code})."
             raise ProductApiError(message, resp.status_code, data.get("code") if isinstance(data, dict) else None)

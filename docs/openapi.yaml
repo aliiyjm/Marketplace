@@ -8,11 +8,15 @@ info:
     19 routes below; the data lives in the DynamoDB single table `MarketplaceDB`
     and the product photos in S3.
 
-    **Authentication:** header `x-api-key`, compared in constant time with the
-    Lambda variable `MARKETPLACE_API_KEY`. If the Lambda has no key configured
-    every protected route answers 503 (fail closed). Only the Flask backend
-    holds the key. `GET /productos/consultar` also works without the key but
-    then only returns ACTIVE products.
+    **Authentication (JWT):** every route needs `Authorization: Bearer <token>`,
+    a JWT (HS256) signed with the Lambda variable `MARKETPLACE_API_KEY`. The
+    secret never travels; the Flask backend signs a new token valid 60 seconds
+    for each request. Permissions go in the `scope` claim: GET routes need
+    `read`, every other route needs `write`. Without a valid token the answer
+    is 401, with a token lacking the permission 403; if the Lambda has no
+    secret configured everything answers 503 (fail closed). Make a token for
+    tests with `python scripts/make_token.py` (read only) or
+    `python scripts/make_token.py --scope "read write"`.
 
     **Errors:** the body is always `{"error": "..."}` (plus `code` when the
     client can act on it). Internal errors return 500 `Internal error.`; the
@@ -30,7 +34,7 @@ servers:
       region:
         default: us-east-1
 security:
-  - ApiKey: []
+  - BearerJWT: []
 tags:
   - name: Productos
     description: Catalog of 17,000 products (DynamoDB PRODUCT#)
@@ -53,10 +57,7 @@ paths:
       description: |
         With `product_id` returns one product. Without it returns a page of up
         to `limit` products (scan, or Query on GSI1 when `category` is given,
-        sorted by price). Without the API key drafts and deleted products are hidden.
-      security:
-        - ApiKey: []
-        - {}
+        sorted by price). Needs the `read` permission.
       parameters:
         - $ref: "#/components/parameters/ProductIdQueryOptional"
         - name: limit
@@ -71,6 +72,7 @@ paths:
           description: category slug (uses the GSI1 index)
           schema: {type: string, pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 60}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: The product, or a page `{items, next_cursor}`
           content:
@@ -91,6 +93,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/Product"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "201":
           description: Created
           content:
@@ -110,6 +113,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/Product"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Updated
           content:
@@ -125,6 +129,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProductIdQuery"
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Deleted
           content:
@@ -149,6 +154,7 @@ paths:
                 product_id: {$ref: "#/components/schemas/ProductId"}
                 delta: {type: integer, minimum: -10000, maximum: 10000, not: {enum: [0]}, example: -2}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: New stock
           content:
@@ -181,6 +187,7 @@ paths:
                   maxItems: 100
                   items: {$ref: "#/components/schemas/Product"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Written
           content:
@@ -221,6 +228,7 @@ paths:
               order_id: "10004"
               items: [{product_id: PRD-000001, qty: 2}, {product_id: PRD-000005, qty: 1}]
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Reserved; new stock of every product
           content:
@@ -256,6 +264,7 @@ paths:
               properties:
                 order_id: {$ref: "#/components/schemas/OrderId"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Released (or already released)
           content:
@@ -293,6 +302,7 @@ paths:
                 content_type: {type: string, enum: [image/jpeg, image/png, image/webp]}
                 data: {type: string, format: byte, description: "photo in base64 (max 1.5 MB decoded)"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Stored; URL saved in the product
           content:
@@ -316,6 +326,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ProductIdQuery"
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Removed
           content:
@@ -340,6 +351,7 @@ paths:
           in: query
           schema: {type: string, format: email}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: The user, or the list of users
           content:
@@ -362,6 +374,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/User"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200": {$ref: "#/components/responses/UserSaved"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -376,6 +389,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/User"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200": {$ref: "#/components/responses/UserSaved"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -388,6 +402,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/UserIdQuery"
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200": {$ref: "#/components/responses/Message"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -399,6 +414,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/UserIdQuery"
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Cart (empty lines if it does not exist)
           content:
@@ -416,6 +432,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/Cart"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Saved
           content:
@@ -434,6 +451,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/UserIdQuery"
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200": {$ref: "#/components/responses/Message"}
         "400": {$ref: "#/components/responses/BadRequest"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -445,6 +463,7 @@ paths:
       parameters:
         - $ref: "#/components/parameters/UserIdQuery"
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Favorites
           content:
@@ -462,6 +481,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/Favorites"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
         "200":
           description: Saved
           content:
@@ -476,11 +496,15 @@ paths:
 
 components:
   securitySchemes:
-    ApiKey:
-      type: apiKey
-      in: header
-      name: x-api-key
-      description: Same value as MARKETPLACE_API_KEY in the Lambda (never in the code or in Git)
+    BearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        HS256 JWT signed with MARKETPLACE_API_KEY (never in the code or in Git).
+        Claims: iss=straw-denim-web, aud=straw-denim-api, scope="read" and/or "write",
+        iat/exp (at most 1 hour), jti. Made by the Flask backend for every request
+        (60 s) or by scripts/make_token.py for manual tests.
 
   parameters:
     ProductIdQuery:
@@ -599,8 +623,13 @@ components:
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}
+    Unauthorized:
+      description: Missing, expired or invalid JWT (bad signature, other algorithm, wrong audience...)
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
     Forbidden:
-      description: Missing or wrong x-api-key
+      description: Valid JWT without the permission ("write") the route needs
       content:
         application/json:
           schema: {$ref: "#/components/schemas/Error"}

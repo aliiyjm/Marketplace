@@ -8,7 +8,7 @@ no tiene foto, se sigue mostrando la silueta SVG pintada con su color (como ante
 ```
 Navegador ──(formulario, máx. 5 MB)──> Flask
    Flask: valida el tipo real del archivo, vuelve a codificar con Pillow
-          (máx. 1200 px, JPEG, SIN metadatos EXIF/GPS) ──> POST /productos/imagen (x-api-key)
+          (máx. 1200 px, JPEG, SIN metadatos EXIF/GPS) ──> POST /productos/imagen (JWT)
    Lambda: vuelve a validar (base64, ≤ 1.5 MB, tipo real) ──> S3: products/PRD-000123/<aleatorio>.jpg
            y guarda image_url en el producto de DynamoDB
 Navegador <──(<img src="https://<bucket>.s3...">)── lee la foto directo de S3 (solo lectura pública)

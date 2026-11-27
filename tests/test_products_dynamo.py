@@ -11,6 +11,7 @@ import pytest
 
 from Implementation.ProductServiceImplementation.ProductServiceImplementation import \
     ProductServiceImplementation
+from Interfaces.ServiceToken import sign_token
 from Interfaces.Validators import ValidationError
 from scripts.build_single_file_lambda import OUT as SINGLE_FILE
 from scripts.build_single_file_lambda import generate
@@ -75,7 +76,7 @@ def services(loaded):
 
 
 def event(method, path, *, query=None, body=None, key=KEY, v1=False):
-    headers = {"X-Api-Key": key} if key else {}
+    headers = {"Authorization": "Bearer " + sign_token(key)} if key else {}   # header case must not matter
     if v1:
         return {"httpMethod": method, "path": path, "headers": headers,
                 "queryStringParameters": query, "body": json.dumps(body) if body is not None else None}
@@ -94,12 +95,13 @@ def item_in(table, product_id):
 
 
 # ---------------- Lambda ----------------
-def test_writes_need_the_api_key(impl, monkeypatch):
-    assert call(impl, "POST", "/productos/agregar", body=PAYLOADS[0], key="wrong")[0] == 403
-    assert call(impl, "POST", "/productos/agregar", body=PAYLOADS[0], key=None)[0] == 403
+def test_every_route_needs_a_valid_token(impl, monkeypatch):
+    assert call(impl, "POST", "/productos/agregar", body=PAYLOADS[0], key="wrong")[0] == 401   # bad signature
+    assert call(impl, "POST", "/productos/agregar", body=PAYLOADS[0], key=None)[0] == 401
+    assert call(impl, "GET", "/productos/consultar", query={"limit": "5"}, key=None)[0] == 401  # reads too
     monkeypatch.delenv("MARKETPLACE_API_KEY")
     assert call(impl, "POST", "/productos/agregar", body=PAYLOADS[0])[0] == 503   # fail closed
-    assert call(impl, "GET", "/productos/consultar", query={"limit": "5"}, key=None)[0] == 200
+    assert call(impl, "GET", "/productos/consultar", query={"limit": "5"})[0] == 503
 
 
 def test_create_get_and_duplicate(impl, table):
@@ -108,7 +110,7 @@ def test_create_get_and_duplicate(impl, table):
     stored = item_in(table, "PRD-000001")
     assert stored["GSI1PK"].startswith("CATEGORY#") and stored["GSI1SK"].startswith("PRICE#")
     assert isinstance(stored["price"], Decimal)
-    status, body = call(impl, "GET", "/productos/consultar", query={"product_id": "PRD-000001"}, key=None)
+    status, body = call(impl, "GET", "/productos/consultar", query={"product_id": "PRD-000001"})
     assert status == 200 and body["price"] == PAYLOADS[0]["price"] and body["sizes"] == PAYLOADS[0]["sizes"]
     assert call(impl, "POST", "/productos/agregar", body=PAYLOADS[0])[0] == 409
     assert call(impl, "GET", "/productos/consultar", query={"product_id": "PRD-999999"})[0] == 404
@@ -154,13 +156,16 @@ def test_stock_never_goes_below_zero(impl, table):
     assert call(impl, "POST", "/productos/stock", body={"product_id": "PRD-000001", "delta": "5"})[0] == 400
 
 
-def test_public_reads_hide_drafts_and_deleted(impl):
+def test_read_only_token_can_read_but_not_write(impl):
+    """RBAC in the API: the "read" permission does not allow changing data."""
     call(impl, "POST", "/productos/cargar", body={"items": [PAYLOADS[0], {**PAYLOADS[1], "status": "draft"}]})
-    status, body = call(impl, "GET", "/productos/consultar", query={"limit": "10"}, key=None)
-    assert [i["product_id"] for i in body["items"]] == ["PRD-000001"]
-    assert call(impl, "GET", "/productos/consultar", query={"product_id": "PRD-000002"}, key=None)[0] == 404
-    status, body = call(impl, "GET", "/productos/consultar", query={"limit": "10"})      # with the key
-    assert len(body["items"]) == 2
+    reader = {"Authorization": "Bearer " + sign_token(KEY, "read")}
+    read = impl._handler({"rawPath": "/productos/consultar", "requestContext": {"http": {"method": "GET"}},
+                          "headers": reader, "queryStringParameters": {"limit": "10"}}, service=impl)
+    assert read["statusCode"] == 200 and len(json.loads(read["body"])["items"]) == 2   # drafts for the backend
+    write = impl._handler({"rawPath": "/productos/agregar", "requestContext": {"http": {"method": "POST"}},
+                           "headers": reader, "body": json.dumps(PAYLOADS[2])}, service=impl)
+    assert write["statusCode"] == 403 and "write" in json.loads(write["body"])["error"]
 
 
 def test_soft_delete_keeps_the_item(impl, table):

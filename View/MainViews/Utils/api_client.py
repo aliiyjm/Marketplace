@@ -1,21 +1,22 @@
 """HTTP client for the users routes of the API Gateway (Lambda + DynamoDB MarketplaceDB).
 
-This is the only part of the view that knows the backend URLs.
-Every users route requires the header x-api-key = MARKETPLACE_API_KEY
-(same value as the Lambda variable); without it the Lambda answers 403.
+The API Gateway URL comes ONLY from API_URL in .env (it is never written in
+the code). Every request carries a new JWT service token (valid 60 s) signed
+with MARKETPLACE_API_KEY; the secret itself never travels. Without a valid
+token the Lambda answers 401.
 """
 import logging
 import os
 
 import requests
 
+from Interfaces.ServiceToken import auth_header
+
 log = logging.getLogger("api_client")
 
-# >>> PASTE HERE the "Invoke URL" of your API Gateway (AWS console ->
-# API Gateway -> your API -> Stages). No trailing "/" and no "/usuarios/...".
-API_URL = os.environ.get(
-    "API_URL", "https://i4rsywszmf.execute-api.us-east-1.amazonaws.com/"
-).rstrip("/")
+# The "Invoke URL" of your API Gateway (AWS console -> API Gateway -> your API ->
+# Stages), set as API_URL in .env. No trailing "/" and no "/usuarios/...".
+API_URL = os.environ.get("API_URL", "").rstrip("/")
 TIMEOUT = 8  # seconds; avoids hanging forever if AWS does not answer
 API_KEY = os.environ.get("MARKETPLACE_API_KEY", "")
 
@@ -37,10 +38,10 @@ class DuplicateId(ApiError):
 def _failure(action, status):
     """Readable error including the HTTP status, to know what AWS answered."""
     hint = ""
-    if status == 403:
+    if status in (401, 403):
         hint = " Check that MARKETPLACE_API_KEY matches the Lambda."
     elif status == 404:
-        hint = " Check that API_URL in Utils/api_client.py is your API Gateway URL."
+        hint = " Check that API_URL in .env is your API Gateway URL."
     return ApiError(f"{action} (HTTP {status}).{hint}")
 
 
@@ -57,9 +58,11 @@ def _clean(user):
 
 
 def _request(method, route, **kwargs):
+    if not API_URL:
+        raise ApiError("API_URL is not configured: set it in .env (API Gateway invoke URL).")
     try:
         resp = requests.request(method, API_URL + route, timeout=TIMEOUT,
-                                headers={"x-api-key": API_KEY}, **kwargs)
+                                headers=auth_header(API_KEY), **kwargs)
     except requests.RequestException:
         raise ApiError("Could not connect to the data server.") from None
     try:

@@ -11,6 +11,7 @@ import json
 from decimal import Decimal
 from urllib.parse import urlsplit
 
+from Interfaces.ServiceToken import sign_token
 from Services.LambdaRouter import lambda_handler as router
 from Services.ProductService.ProductService import handle_productos as lambda_handler
 
@@ -298,3 +299,8 @@ class FakeS3Client:
 
     def delete_object(self, Bucket, Key):
         self.objects.pop((Bucket, Key), None)
+
+
+def auth(secret, scope="read write"):
+    """Headers of a request signed like the Flask app does (JWT service token)."""
+    return {"authorization": "Bearer " + sign_token(secret, scope)} if secret else {}

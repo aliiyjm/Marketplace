@@ -10,29 +10,32 @@ Items in MarketplaceDB:
     carts      PK=CART#<id_user>      SK=CART       lines=[{line_id, product_id, size, color, qty}]
     favorites  PK=FAV#<id_user>       SK=FAV        items={product_id: added_at}
 
-Routes:
-    /usuarios/consultar (GET)  agregar (POST)  modificar (PUT)  eliminar (DELETE)   -> key required
-    /productos/consultar (GET, public: active only)  agregar (POST)  modificar (PUT)
-    /productos/eliminar (DELETE)  stock (POST)  cargar (POST)                        -> key required
-    /productos/imagen (POST: upload photo to S3, DELETE: remove photo)              -> key required
-    /carrito/consultar (GET)  guardar (PUT)  vaciar (DELETE)                          -> key required
-    /favoritos/consultar (GET)  guardar (PUT)                                         -> key required
+Routes (every one needs a JWT service token: Authorization: Bearer <token>;
+GET routes need the "read" permission, the rest "write"):
+    /usuarios/consultar (GET)  agregar (POST)  modificar (PUT)  eliminar (DELETE)
+    /productos/consultar (GET)  agregar (POST)  modificar (PUT)  eliminar (DELETE)
+    /productos/stock (POST)  cargar (POST)  imagen (POST/DELETE: photo in S3)
+    /productos/reservar (POST)  liberar (POST)          atomic TransactWriteItems
+    /carrito/consultar (GET)  guardar (PUT)  vaciar (DELETE)
+    /favoritos/consultar (GET)  guardar (PUT)
 
 Environment variables of the Lambda:
     MARKETPLACE_TABLE    (default MarketplaceDB)
     MARKETPLACE_GSI      (default GSI1)
-    MARKETPLACE_API_KEY  secret shared with the Flask app (header x-api-key)
+    MARKETPLACE_API_KEY  secret shared with the Flask app; signs the JWT service tokens (Authorization: Bearer)
     MARKETPLACE_BUCKET   S3 bucket for product photos (optional; without it photos are disabled)
 Handler: lambda_function.lambda_handler
 """
 import base64
 import binascii
+import hashlib
 import hmac
 import json
 import logging
 import os
 import re
 import secrets
+import time
 import unicodedata
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -624,6 +627,108 @@ class FavItem:
 
 
 # ======================================================================
+# from Interfaces/ServiceToken.py
+# ======================================================================
+ALGORITHM = "HS256"
+ISSUER = "straw-denim-web"
+AUDIENCE = "straw-denim-api"
+TOKEN_LIFETIME = 60          # seconds: tokens made by the Flask app for each request
+MAX_LIFETIME = 3600          # longest token accepted (scripts/make_token.py, for Postman)
+CLOCK_SKEW = 30              # seconds of clock difference tolerated between machines
+SCOPES = ("read", "write")
+MAX_TOKEN_LENGTH = 2048
+
+
+class TokenError(Exception):
+    """The token is missing, malformed, expired or has a bad signature."""
+
+
+def _b64(data):
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _unb64(text):
+    try:
+        return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    except (ValueError, TypeError):
+        raise TokenError("malformed token") from None
+
+
+def _signature(secret, signing_input):
+    return hmac.new(secret.encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256).digest()
+
+
+def sign_token(secret, scope="read write", subject="flask-app", lifetime=TOKEN_LIFETIME, now=None):
+    """A new JWT signed with `secret`."""
+    if not secret:
+        raise TokenError("no secret configured")
+    wanted = scope.split()
+    if not wanted or any(s not in SCOPES for s in wanted):
+        raise TokenError("unknown scope")
+    if not 1 <= lifetime <= MAX_LIFETIME:
+        raise TokenError("invalid lifetime")
+    issued = int(time.time() if now is None else now)
+    header = {"alg": ALGORITHM, "typ": "JWT"}
+    claims = {"iss": ISSUER, "aud": AUDIENCE, "sub": subject, "scope": " ".join(wanted),
+              "iat": issued, "exp": issued + lifetime, "jti": secrets.token_hex(12)}
+    signing_input = (_b64(json.dumps(header, separators=(",", ":")).encode())
+                     + "." + _b64(json.dumps(claims, separators=(",", ":")).encode()))
+    return signing_input + "." + _b64(_signature(secret, signing_input))
+
+
+def verify_token(token, secret, now=None):
+    """Claims of a valid token; TokenError (short reason) otherwise."""
+    if not secret:
+        raise TokenError("no secret configured")
+    if not isinstance(token, str) or not token or len(token) > MAX_TOKEN_LENGTH:
+        raise TokenError("missing or oversized token")
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise TokenError("malformed token")
+    header_b64, claims_b64, signature_b64 = parts
+    try:
+        header = json.loads(_unb64(header_b64))
+        claims = json.loads(_unb64(claims_b64))
+    except (ValueError, UnicodeDecodeError):
+        raise TokenError("malformed token") from None
+    if not isinstance(header, dict) or header.get("alg") != ALGORITHM or header.get("typ", "JWT") != "JWT":
+        raise TokenError("algorithm not allowed")            # blocks alg=none and algorithm confusion
+    expected = _signature(secret, header_b64 + "." + claims_b64)
+    if not hmac.compare_digest(expected, _unb64(signature_b64)):
+        raise TokenError("bad signature")
+    if not isinstance(claims, dict):
+        raise TokenError("malformed token")
+    current = int(time.time() if now is None else now)
+    iat, exp = claims.get("iat"), claims.get("exp")
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (iat, exp)):
+        raise TokenError("missing times")
+    if claims.get("iss") != ISSUER or claims.get("aud") != AUDIENCE:
+        raise TokenError("wrong issuer or audience")
+    if exp <= current - CLOCK_SKEW:
+        raise TokenError("expired")
+    if iat > current + CLOCK_SKEW or exp - iat > MAX_LIFETIME or exp <= iat:
+        raise TokenError("invalid times")
+    scope = claims.get("scope")
+    if not isinstance(scope, str) or not scope.split() or any(s not in SCOPES for s in scope.split()):
+        raise TokenError("invalid scope")
+    if not isinstance(claims.get("jti"), str):
+        raise TokenError("missing token id")
+    return claims
+
+
+def bearer_token(headers):
+    """Token of an `Authorization: Bearer <token>` header (headers already lowercased), or ''."""
+    value = str((headers or {}).get("authorization", ""))
+    kind, _, token = value.partition(" ")
+    return token.strip() if kind.lower() == "bearer" else ""
+
+
+def auth_header(secret, scope="read write"):
+    """{"Authorization": "Bearer <new token>"} for an outgoing request ({} without a secret)."""
+    return {"Authorization": "Bearer " + sign_token(secret, scope)} if secret else {}
+
+
+# ======================================================================
 # from Services/LambdaCommon.py
 # ======================================================================
 log = logging.getLogger()
@@ -683,11 +788,37 @@ def api_key_configured():
     return bool(os.environ.get("MARKETPLACE_API_KEY"))
 
 
-def authorized(headers):
-    """Constant-time comparison of the x-api-key header with the Lambda secret."""
-    expected = os.environ.get("MARKETPLACE_API_KEY", "")
-    sent = str(headers.get("x-api-key", ""))
-    return bool(expected) and hmac.compare_digest(sent.encode(), expected.encode())
+def token_claims(headers):
+    """Claims of a valid JWT in Authorization: Bearer, or None (reason only in CloudWatch)."""
+    secret = os.environ.get("MARKETPLACE_API_KEY", "")
+    token = bearer_token(headers)
+    if not secret or not token:
+        return None
+    try:
+        return verify_token(token, secret)
+    except TokenError as e:
+        log.info("Rejected token: %s", e)
+        return None
+
+
+def authorized(headers, scope="write"):
+    """True when the request carries a valid token WITH that permission."""
+    claims = token_claims(headers)
+    return bool(claims) and scope in claims["scope"].split()
+
+
+def access_denied(headers, scope):
+    """None if the request may go on; otherwise the error response.
+    503 = the Lambda has no secret (fail closed), 401 = no valid token,
+    403 = valid token without the permission the route needs (RBAC)."""
+    if not api_key_configured():
+        return response(503, {"error": "MARKETPLACE_API_KEY is not configured in the Lambda."})
+    claims = token_claims(headers)
+    if claims is None:
+        return response(401, {"error": "Missing or invalid token."})
+    if scope not in claims["scope"].split():
+        return response(403, {"error": "Forbidden: the token lacks the '" + scope + "' permission."})
+    return None
 
 
 # ======================================================================
@@ -1224,19 +1355,16 @@ def handle_productos(event, context=None, service=None):
         return response(404, {"error": "Route not found."})
     if (route, method) not in PRODUCT_ROUTES:
         return response(405, {"error": "Method not allowed."})
-    trusted = authorized(headers)
-    if route in PRODUCT_WRITE_ROUTES:
-        if not api_key_configured():
-            return response(503, {"error": "Writes are disabled: MARKETPLACE_API_KEY is not configured in the Lambda."})
-        if not trusted:
-            return response(403, {"error": "Forbidden."})
+    denied = access_denied(headers, "write" if route in PRODUCT_WRITE_ROUTES else "read")
+    if denied:
+        return denied
 
     svc = service or default_product_service()
     try:
         if route == PRODUCT_QUERY:
             if query.get("product_id"):
                 item = svc.get(_product_id(query["product_id"]))
-                if not item or (not trusted and item.status != "active"):
+                if not item:
                     return response(404, {"error": "Product not found."})
                 return response(200, item.to_payload())
             limit = parse_int(query.get("limit", 1000), field="limit", min_value=1, max_value=2000, strict=True)
@@ -1244,8 +1372,6 @@ def handle_productos(event, context=None, service=None):
             if category and not (len(category) <= 60 and SLUG_RE.fullmatch(category)):
                 raise ValidationError("category is invalid.")
             items, cursor = svc.list_page(query.get("cursor"), limit, category)
-            if not trusted:
-                items = [i for i in items if i.status == "active"]
             return response(200, {"items": [i.to_payload() for i in items], "next_cursor": cursor})
 
         if route == PRODUCT_DELETE:
@@ -1349,10 +1475,9 @@ def handle_usuarios(event, context=None, service=None):
         return response(404, {"error": "Route not found."})
     if (route, method) not in USER_ROUTES:
         return response(405, {"error": "Method not allowed."})
-    if not api_key_configured():
-        return response(503, {"error": "MARKETPLACE_API_KEY is not configured in the Lambda."})
-    if not authorized(headers):
-        return response(403, {"error": "Forbidden."})
+    denied = access_denied(headers, "read" if method == "GET" else "write")
+    if denied:
+        return denied
 
     svc = service or default_user_service()
     try:
@@ -1421,10 +1546,9 @@ def handle_rapidas(event, context=None, carts=None, favorites=None):
         return response(404, {"error": "Route not found."})
     if (route, method) not in QUICK_ROUTES:
         return response(405, {"error": "Method not allowed."})
-    if not api_key_configured():
-        return response(503, {"error": "MARKETPLACE_API_KEY is not configured in the Lambda."})
-    if not authorized(headers):
-        return response(403, {"error": "Forbidden."})
+    denied = access_denied(headers, "read" if method == "GET" else "write")
+    if denied:
+        return denied
     if carts is None or favorites is None:
         default_carts, default_favorites = default_quick_services()
         carts, favorites = carts or default_carts, favorites or default_favorites

@@ -18,12 +18,11 @@ Routes:
     POST   /productos/liberar     body: {order_id}
                                   ATOMIC: give the stock of a cancelled order back, only once
 
-Security: every route that WRITES requires the header `x-api-key` equal to the
-Lambda variable MARKETPLACE_API_KEY (constant-time compare). If it is not
-configured, writes are refused (fail closed). Reads without the key only see
-ACTIVE products (drafts and deleted ones stay private). Every payload is
-validated with ProductItem before it reaches DynamoDB, and errors never expose
-internal details. Photos are checked again here (defense in depth): strict
+Security: EVERY route needs a JWT service token (Authorization: Bearer)
+signed with MARKETPLACE_API_KEY: GET routes need the "read" permission, the
+rest "write" (see Interfaces/ServiceToken.py). Without the secret configured
+the Lambda refuses everything (fail closed). Every payload is validated with
+ProductItem before it reaches DynamoDB, and errors never expose internal details. Photos are checked again here (defense in depth): strict
 base64, at most MAX_IMAGE_BYTES, and the real file type (magic bytes) must be
 JPEG/PNG/WebP and match the declared one.
 """
@@ -42,8 +41,8 @@ from Interfaces.ProductServiceInterface.ProductServiceInterface import (ImagesDi
                                                                         ReservationExists,
                                                                         ReservationNotFound)
 from Interfaces.Validators import PRODUCT_ID_RE, SLUG_RE, ValidationError, parse_int
-from Services.LambdaCommon import (api_key_configured, authorized, get_table, gsi_name,
-                                   json_body, log, parse_request, response)
+from Services.LambdaCommon import (access_denied, get_table, gsi_name, json_body, log, parse_request,
+                                   response)
 
 MAX_BATCH = 100
 MAX_IMAGE_BODY = MAX_IMAGE_BYTES * 4 // 3 + 4096      # base64 makes the file ~33% bigger
@@ -146,19 +145,16 @@ def handle_productos(event, context=None, service=None):
         return response(404, {"error": "Route not found."})
     if (route, method) not in PRODUCT_ROUTES:
         return response(405, {"error": "Method not allowed."})
-    trusted = authorized(headers)
-    if route in PRODUCT_WRITE_ROUTES:
-        if not api_key_configured():
-            return response(503, {"error": "Writes are disabled: MARKETPLACE_API_KEY is not configured in the Lambda."})
-        if not trusted:
-            return response(403, {"error": "Forbidden."})
+    denied = access_denied(headers, "write" if route in PRODUCT_WRITE_ROUTES else "read")
+    if denied:
+        return denied
 
     svc = service or default_product_service()
     try:
         if route == PRODUCT_QUERY:
             if query.get("product_id"):
                 item = svc.get(_product_id(query["product_id"]))
-                if not item or (not trusted and item.status != "active"):
+                if not item:
                     return response(404, {"error": "Product not found."})
                 return response(200, item.to_payload())
             limit = parse_int(query.get("limit", 1000), field="limit", min_value=1, max_value=2000, strict=True)
@@ -166,8 +162,6 @@ def handle_productos(event, context=None, service=None):
             if category and not (len(category) <= 60 and SLUG_RE.fullmatch(category)):
                 raise ValidationError("category is invalid.")
             items, cursor = svc.list_page(query.get("cursor"), limit, category)
-            if not trusted:
-                items = [i for i in items if i.status == "active"]
             return response(200, {"items": [i.to_payload() for i in items], "next_cursor": cursor})
 
         if route == PRODUCT_DELETE:
