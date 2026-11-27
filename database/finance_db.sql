@@ -33,6 +33,7 @@ CREATE TABLE payments (
     order_id VARCHAR(50) NOT NULL,
     payment_method VARCHAR(30) NOT NULL, -- CARD, TRANSFER, CASH
     card_last4 CHAR(4) NULL,             -- Only the last 4 digits, never the full number
+    card_token VARCHAR(40) NULL,         -- payment-method token (tok_...), never the card or the CVV
     status VARCHAR(20) NOT NULL,         -- SUCCESS, FAILED, PENDING
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE

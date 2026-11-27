@@ -21,7 +21,7 @@ ENV_FOUND = load_env_file()
 FINANCE_TABLES = {
     "orders": ["order_id", "buyer_id", "created_at", "status", "subtotal", "tax_amount", "total_amount"],
     "order_items": ["item_id", "order_id", "product_id", "quantity", "unit_price", "size", "color"],
-    "payments": ["payment_id", "order_id", "payment_method", "card_last4", "status", "processed_at"],
+    "payments": ["payment_id", "order_id", "payment_method", "card_last4", "card_token", "status", "processed_at"],
     "shipping_addresses": ["address_id", "order_id", "street", "city", "state", "zip_code"],
     "invoices": ["invoice_id", "order_id", "pdf_receipt_url", "issued_at"],
     "order_status_history": ["history_id", "order_id", "old_status", "new_status", "changed_at"],

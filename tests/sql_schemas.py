@@ -24,7 +24,7 @@ CREATE TABLE order_items (
     FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE);
 CREATE TABLE payments (
     payment_id VARCHAR(50) PRIMARY KEY, order_id VARCHAR(50) NOT NULL, payment_method VARCHAR(30) NOT NULL,
-    card_last4 CHAR(4) NULL, status VARCHAR(20) NOT NULL, processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    card_last4 CHAR(4) NULL, card_token VARCHAR(40) NULL, status VARCHAR(20) NOT NULL, processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE);
 CREATE TABLE shipping_addresses (
     address_id INTEGER PRIMARY KEY AUTOINCREMENT, order_id VARCHAR(50) NOT NULL, street VARCHAR(150) NOT NULL,

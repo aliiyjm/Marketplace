@@ -72,7 +72,7 @@ Admin "Cancel" ──> MySQL CALL sp_cancel_order(pedido, estado_visto, fecha)
 
 - Todo valor llega como **parámetro**; no hay SQL dinámico (`PREPARE`/`EXECUTE`): no hay inyección SQL.
 - Validan sus entradas aunque la app ya lo haga (cantidades 1-10, máximo 30 líneas, código postal,
-  solo los **últimos 4 dígitos** de la tarjeta, método de pago válido).
+  solo los **últimos 4 dígitos** y el **token** `tok_...` de la tarjeta, método de pago válido).
 - Errores de negocio con `SIGNAL SQLSTATE '45000'` y un código (`STALE_ORDER`, `INVALID_TRANSITION`...)
   que la app traduce a un mensaje amable. Cualquier otro error hace `ROLLBACK` completo.
 - Las rutas de la Lambda exigen la API key, validan el número de pedido (solo dígitos), los

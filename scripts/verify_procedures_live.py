@@ -89,6 +89,7 @@ def run_mysql():
                               items, {"street": "Av. Universidad 1", "city": "Emiliano Zapata",
                                       "state": "Morelos", "zip_code": "62765"},
                               {"payment_id": f"PAY-{oid}", "payment_method": method, "card_last4": last4,
+                               "card_token": ("tok_" + secrets.token_hex(16)) if last4 else None,
                                "status": "Awaiting payment"},
                               {"old_status": None, "new_status": "Pending", "changed_at": now.isoformat()})
 
@@ -107,6 +108,8 @@ def run_mysql():
               (Decimal("1699.00"), Decimal("1464.66"), Decimal("234.34")),
               f"{o['total_amount']} {o['subtotal']} {o['tax_amount']}")
         check("only the last 4 card digits are stored", full["payment"]["card_last4"] == "4242")
+        check("the card token is stored", full["payment"]["card_token"].startswith("tok_")
+              and len(full["payment"]["card_token"]) == 36)
         check("same order number again -> DuplicateKey", raises(lambda: order(20001, lines), DuplicateKey))
         bad = [dict(lines[0], quantity=0)]
         check("invalid quantity -> rejected", raises(lambda: order(20002, bad), ValidationError, "invalid items"))

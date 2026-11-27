@@ -20,19 +20,20 @@
 CALL sp_create_order('90001', 'u-ana00001', '2026-11-20 10:15:00',
      '[{"product_id": "PRD-000001", "quantity": 1, "unit_price": "1099.00", "size": "S", "color": "Red"},
        {"product_id": "PRD-000005", "quantity": 2, "unit_price": "299.00", "size": "M", "color": "Gray"}]',
-     'Av. Universidad 100', 'Emiliano Zapata', 'Morelos', '62765', 'CARD', '4242');
+     'Av. Universidad 100', 'Emiliano Zapata', 'Morelos', '62765', 'CARD', '4242',
+     'tok_0123456789abcdef0123456789abcdef');
 CALL sp_change_order_status('90001', 'PENDING', 'PAID', '2026-11-20 10:15:05', '100001', '/orders/90001/invoice');
 CALL sp_change_order_status('90001', 'PAID', 'SHIPPED', '2026-11-21 09:00:00', NULL, NULL);
 
 -- 2) SPEI (bank transfer) order: still waiting for the payment.
 CALL sp_create_order('90002', 'u-ana00001', '2026-11-22 18:40:00',
      '[{"product_id": "PRD-000003", "quantity": 1, "unit_price": "1099.00", "size": "26", "color": "White"}]',
-     'Av. Universidad 100', 'Emiliano Zapata', 'Morelos', '62765', 'TRANSFER', NULL);
+     'Av. Universidad 100', 'Emiliano Zapata', 'Morelos', '62765', 'TRANSFER', NULL, NULL);
 
 -- 3) Cash order cancelled by an admin (payment cancelled, history kept).
 CALL sp_create_order('90003', 'u-ana00001', '2026-11-23 12:05:00',
      '[{"product_id": "PRD-000008", "quantity": 1, "unit_price": "1949.00", "size": "L", "color": "Black"}]',
-     'Av. Universidad 100', 'Emiliano Zapata', 'Morelos', '62765', 'CASH', NULL);
+     'Av. Universidad 100', 'Emiliano Zapata', 'Morelos', '62765', 'CASH', NULL, NULL);
 CALL sp_cancel_order('90003', 'PENDING', '2026-11-23 15:30:00');
 
 -- Consolidated history of the buyer (on an empty database: 3 orders, 2 not cancelled, $2,796.00 spent):

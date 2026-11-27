@@ -35,6 +35,7 @@ PROCEDURE_MESSAGES = {
     "INVALID_ORDER_ITEMS": "The order has invalid items.",
     "INVALID_PAYMENT_METHOD": "Choose a valid payment method.",
     "INVALID_CARD_LAST4": "The card number is invalid.",
+    "INVALID_CARD_TOKEN": "The card could not be tokenized. Try again.",
     "INVALID_ZIP_CODE": "The ZIP code must have 5 digits.",
     "INVALID_ORDER_ID": "Invalid order number.",
 }
@@ -79,10 +80,11 @@ class MySQLFinanceRepository(FinanceRepositoryInterface):
         if self.use_procedures:
             try:
                 with self.db.transaction() as cur:
-                    cur.call("CALL sp_create_order(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    cur.call("CALL sp_create_order(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                              (oid, order["buyer_id"], as_datetime(order["created_at"]), _lines_json(items),
                               shipping["street"], shipping["city"], shipping["state"], shipping["zip_code"],
-                              _to_db(PAY_METHOD, payment["payment_method"]), payment.get("card_last4") or None))
+                              _to_db(PAY_METHOD, payment["payment_method"]), payment.get("card_last4") or None,
+                              payment.get("card_token") or None))
             except ProcedureError as e:
                 raise _procedure_error(e) from None
             return
@@ -100,11 +102,11 @@ class MySQLFinanceRepository(FinanceRepositoryInterface):
             cur.execute("INSERT INTO shipping_addresses (order_id, street, city, state, zip_code) "
                         "VALUES (%s, %s, %s, %s, %s)",
                         (oid, shipping["street"], shipping["city"], shipping["state"], shipping["zip_code"]))
-            cur.execute("INSERT INTO payments (payment_id, order_id, payment_method, card_last4, status, processed_at) "
-                        "VALUES (%s, %s, %s, %s, %s, %s)",
+            cur.execute("INSERT INTO payments (payment_id, order_id, payment_method, card_last4, card_token, "
+                        "status, processed_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                         (payment["payment_id"], oid, _to_db(PAY_METHOD, payment["payment_method"]),
-                         payment.get("card_last4") or None, _to_db(PAY_STATUS, payment["status"]),
-                         as_datetime(payment.get("processed_at"))))
+                         payment.get("card_last4") or None, payment.get("card_token") or None,
+                         _to_db(PAY_STATUS, payment["status"]), as_datetime(payment.get("processed_at"))))
             cur.execute("INSERT INTO order_status_history (order_id, old_status, new_status, changed_at) "
                         "VALUES (%s, %s, %s, %s)",
                         (oid, _to_db(ORDER_STATUS, history["old_status"]) if history["old_status"] else None,
@@ -243,7 +245,7 @@ class MySQLFinanceRepository(FinanceRepositoryInterface):
                              "changed_at": as_iso(h["changed_at"])} for h in history.get(oid, [])],
                 "payment": {"payment_id": pay["payment_id"], "order_id": int(oid),
                             "payment_method": _from_db(PAY_METHOD, pay["payment_method"]),
-                            "card_last4": pay.get("card_last4") or "",
+                            "card_last4": pay.get("card_last4") or "", "card_token": pay.get("card_token") or "",
                             "status": _from_db(PAY_STATUS, pay["status"]),
                             "processed_at": as_iso(pay.get("processed_at"))} if pay else None,
                 "shipping": {"address_id": int(ship["address_id"]), "order_id": int(oid), "street": ship["street"],

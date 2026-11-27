@@ -89,6 +89,7 @@ erDiagram
         varchar order_id FK
         varchar payment_method "CARD TRANSFER CASH"
         char card_last4 "solo 4 digitos, nunca la tarjeta ni el CVV"
+        varchar card_token "token del metodo de pago (tok_...)"
         varchar status "SUCCESS PENDING CANCELLED REFUNDED FAILED"
         timestamp processed_at
     }

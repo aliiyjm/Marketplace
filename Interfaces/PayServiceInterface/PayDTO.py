@@ -1,6 +1,7 @@
 """PayDTO: checkout forms and orders (MySQL: ORDERS, ORDER_ITEMS, STATUS_HISTORY,
 PAYMENTS, SHIPPING, INVOICES)."""
 import re
+import secrets
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -50,7 +51,8 @@ class CheckoutForm:
     state: str
     zip_code: str
     method: str
-    card_last4: str = ""     # the only card data that survives this DTO
+    card_last4: str = ""     # last 4 digits, shown to the buyer ("Card · ending 4242")
+    card_token: str = ""     # opaque payment-method token (tok_ + 32 hex): never the card number
 
     def __repr__(self):
         return f"CheckoutForm(method={self.method!r}, zip={self.zip_code!r})"
@@ -77,15 +79,17 @@ class CheckoutForm:
         method = form.get("method", "")
         if method not in PAYMENT_METHODS:
             errors.append("Choose a payment method.")
-        last4 = ""
+        last4, token = "", ""
         if method == "card":
-            # Card data is validated and then discarded. In production it goes to the
-            # payment provider (tokenization) and never reaches our servers.
+            # Card data is validated and then discarded. Tokenization: like a payment
+            # provider would, the card is exchanged for an opaque random token; only the
+            # token and the last 4 digits are kept. The number and the CVV never leave
+            # this method (simulated provider: no real charge is made).
             number = re.sub(r"[\s-]", "", str(form.get("card_number", "")))
             if not (number.isdigit() and 13 <= len(number) <= 19 and luhn_ok(number)):
                 errors.append("Enter a valid card number.")
             else:
-                last4 = number[-4:]
+                last4, token = number[-4:], "tok_" + secrets.token_hex(16)
             exp = re.fullmatch(r"\s*(\d{2})\s*/\s*(\d{2})\s*", str(form.get("expiry", "")))
             today = today or date.today()
             if not exp or not 1 <= int(exp.group(1)) <= 12:
@@ -97,7 +101,7 @@ class CheckoutForm:
         if errors:
             raise ValidationError(errors)
         return cls(street=street, city=city, state=state, zip_code=zip_code,
-                   method=method, card_last4=last4)
+                   method=method, card_last4=last4, card_token=token)
 
 
 @dataclass(frozen=True)

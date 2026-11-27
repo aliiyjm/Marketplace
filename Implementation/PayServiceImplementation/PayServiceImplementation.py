@@ -137,7 +137,8 @@ class PayServiceImplementation(PayServiceInterface):
         order = {"order_id": order_id, "buyer_id": user_id, "created_at": now, "status": "Pending",
                  "subtotal": subtotal, "tax_amount": tax, "total_amount": total}
         payment = {"payment_id": f"PAY-{order_id}", "payment_method": form.method,
-                   "card_last4": form.card_last4, "status": "Awaiting payment", "processed_at": now}
+                   "card_last4": form.card_last4, "card_token": form.card_token,
+                   "status": "Awaiting payment", "processed_at": now}
         history = {"old_status": None, "new_status": "Pending", "changed_at": now}
         self.repo.create_order(order, items, shipping, payment, history)
 

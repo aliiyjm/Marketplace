@@ -8,7 +8,8 @@
 - PostgreSQL        <- database/operations_procedures.sql (2 functions)
 
 It only runs DROP PROCEDURE IF EXISTS / CREATE PROCEDURE / CREATE OR REPLACE
-FUNCTION / CREATE INDEX (only missing ones): data is never deleted or changed,
+FUNCTION / CREATE INDEX and ALTER TABLE ADD COLUMN (only missing ones, NULL
+columns): data is never deleted or changed,
 so it is safe to run again after every change. Connection settings come from your .env (same as the app).
 """
 import argparse
@@ -35,6 +36,20 @@ def finance_indexes():
     text = FINANCE_DDL.read_text(encoding="utf-8")
     return [(m.group(1), m.group(2), f"CREATE INDEX {m.group(1)} ON {m.group(2)} ({m.group(3)})")
             for m in pattern.finditer(text)]
+
+
+# Columns added after the first version of finance_db.sql: (table, column, ALTER statement).
+FINANCE_NEW_COLUMNS = (
+    ("payments", "card_token",
+     "ALTER TABLE payments ADD COLUMN card_token VARCHAR(40) NULL AFTER card_last4"),
+)
+
+
+def missing_columns(cur):
+    have = {(r["t"], r["c"]) for r in cur.execute(
+        "SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE()").fetchall()}
+    return [(table, column, sql) for table, column, sql in FINANCE_NEW_COLUMNS if (table, column) not in have]
 
 
 def missing_indexes(cur):
@@ -81,6 +96,9 @@ def install_mysql(db, out=print):
                                for part in (version.split("-")[0].split(".") + ["0", "0"])[:3])
         if (major, minor, patch) < (8, 0, 4):
             raise RuntimeError(f"MySQL {version} is too old: the procedures need 8.0.4+ (JSON_TABLE).")
+        new_columns = missing_columns(cur)
+        for _, _, sql in new_columns:            # add columns first: the procedures use them
+            cur._cursor.execute(sql)
         for statement in mysql_statements():
             cur._cursor.execute(statement)       # no parameters: the text is our own file
         added = missing_indexes(cur)
@@ -88,6 +106,7 @@ def install_mysql(db, out=print):
             cur._cursor.execute(sql)
     out(f"  ✓ {len(MYSQL_ROUTINES)} procedures installed (MySQL {version})")
     out(f"  ✓ indexes: {len(finance_indexes())} expected, {len(added)} added now")
+    out(f"  ✓ new columns: {len(FINANCE_NEW_COLUMNS)} expected, {len(new_columns)} added now")
 
 
 def install_postgres(db, out=print):

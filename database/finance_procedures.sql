@@ -49,7 +49,8 @@ CREATE PROCEDURE sp_create_order(
     IN p_state      VARCHAR(100),
     IN p_zip_code   VARCHAR(20),
     IN p_method     VARCHAR(30),
-    IN p_card_last4 CHAR(4)
+    IN p_card_last4 CHAR(4),
+    IN p_card_token VARCHAR(40)
 )
 BEGIN
     DECLARE v_lines    INT DEFAULT 0;
@@ -68,9 +69,12 @@ BEGIN
     IF p_method NOT IN ('CARD', 'TRANSFER', 'CASH') THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'INVALID_PAYMENT_METHOD';
     END IF;
-    -- Only the last 4 digits of a card are ever stored (never the number or the CVV).
+    -- A card is stored as its token + last 4 digits (never the number or the CVV).
     IF p_method = 'CARD' AND (p_card_last4 IS NULL OR p_card_last4 NOT REGEXP '^[0-9]{4}$') THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'INVALID_CARD_LAST4';
+    END IF;
+    IF p_method = 'CARD' AND (p_card_token IS NULL OR p_card_token NOT REGEXP '^tok_[0-9a-f]{32}$') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'INVALID_CARD_TOKEN';
     END IF;
     IF p_zip_code NOT REGEXP '^[0-9]{5}$' THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'INVALID_ZIP_CODE';
@@ -112,9 +116,10 @@ BEGIN
         INSERT INTO shipping_addresses (order_id, street, city, state, zip_code)
         VALUES (p_order_id, p_street, p_city, p_state, p_zip_code);
 
-        INSERT INTO payments (payment_id, order_id, payment_method, card_last4, status, processed_at)
+        INSERT INTO payments (payment_id, order_id, payment_method, card_last4, card_token, status, processed_at)
         VALUES (CONCAT('PAY-', p_order_id), p_order_id, p_method,
-                IF(p_method = 'CARD', p_card_last4, NULL), 'PENDING', p_created_at);
+                IF(p_method = 'CARD', p_card_last4, NULL), IF(p_method = 'CARD', p_card_token, NULL),
+                'PENDING', p_created_at);
 
         INSERT INTO order_status_history (order_id, old_status, new_status, changed_at)
         VALUES (p_order_id, NULL, 'PENDING', p_created_at);

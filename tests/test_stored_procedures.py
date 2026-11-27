@@ -274,3 +274,46 @@ def test_finance_indexes_cover_the_frequent_queries():
         "idx_orders_buyer_created": "CREATE INDEX idx_orders_buyer_created ON orders (buyer_id, created_at)",
         "idx_orders_status_created": "CREATE INDEX idx_orders_status_created ON orders (status, created_at)",
         "idx_order_items_product": "CREATE INDEX idx_order_items_product ON order_items (product_id)"}
+
+
+# ---------------- payment tokenization ----------------
+def test_card_is_tokenized_and_its_number_discarded():
+    import re
+    from Interfaces.PayServiceInterface.PayDTO import CheckoutForm
+    base = {"street": "Calle 1", "city": "Cuernavaca", "state": "Morelos", "zip_code": "62000"}
+    card = dict(base, method="card", card_number="4242 4242 4242 4242", expiry="12/30", cvv="123")
+    first, second = CheckoutForm.from_form(card), CheckoutForm.from_form(card)
+    assert re.fullmatch(r"tok_[0-9a-f]{32}", first.card_token) and first.card_token != second.card_token
+    assert first.card_last4 == "4242" and "4242424242424242" not in repr(first) + str(vars(first))
+    assert not hasattr(first, "cvv") and not hasattr(first, "card_number")
+    assert CheckoutForm.from_form(dict(base, method="cash")).card_token == ""
+
+
+def test_stored_payment_has_token_and_never_the_card(finance):
+    order, items, shipping, payment, history = order_rows(10001)
+    finance.create_order(order, items, shipping,
+                         dict(payment, payment_method="card", card_last4="4242",
+                              card_token="tok_" + "a" * 32), history)
+    stored = finance.get_order(10001)["payment"]
+    assert stored["card_last4"] == "4242" and stored["card_token"] == "tok_" + "a" * 32
+    assert "4242424242424242" not in str(finance.get_order(10001))
+
+
+def test_create_order_procedure_receives_the_token():
+    db = RecordingDb("mysql")
+    order, items, shipping, payment, history = order_rows(10001)
+    MySQLFinanceRepository(db).create_order(order, items, shipping,
+                                            dict(payment, payment_method="card", card_last4="4242",
+                                                 card_token="tok_" + "b" * 32), history)
+    sql, params = db.calls[0]
+    assert sql.count("%s") == 11 and params[8:] == ("CARD", "4242", "tok_" + "b" * 32)
+    mysql = (ROOT / "database" / "finance_procedures.sql").read_text(encoding="utf-8")
+    assert "INVALID_CARD_TOKEN" in mysql and "'^tok_[0-9a-f]{32}$'" in mysql
+
+
+def test_new_columns_are_in_the_ddl_and_the_migration():
+    from scripts.install_procedures import FINANCE_NEW_COLUMNS
+    ddl = (ROOT / "database" / "finance_db.sql").read_text(encoding="utf-8")
+    for table, column, sql in FINANCE_NEW_COLUMNS:
+        assert f"    {column} " in ddl and sql.startswith(f"ALTER TABLE {table} ADD COLUMN {column} ")
+        assert "NULL" in sql and "DROP" not in sql.upper()
