@@ -31,7 +31,8 @@ from View.MainViews.PY import (account_views, admin_views, auth_views,  # noqa: 
                                cart_views, seller_views, shop_views)
 from View.MainViews.PY.security import init_security, services  # noqa: E402
 
-STORE_NAME = "Marketplace"
+STORE_NAME = "Straw Denim"     # name shown in every page, invoice and the browser tab
+STORE_MARK = "SD"              # initials in the logo square
 
 
 def _money(value):
@@ -75,6 +76,7 @@ def create_app(container=None, config=None):
         uid = g.user.id_user if g.get("user") else None
         return {
             "store_name": STORE_NAME,
+            "store_mark": STORE_MARK,
             "current_user": g.get("user"),
             "cart_count": svc.cart_count.for_user(uid),
             "fav_ids": svc.fav.ids(uid) if uid else set(),

@@ -5,7 +5,7 @@
 {%- endmacro %}
 <aside class="sidenav">
   <a class="sidenav__brand" href="{{ url_for('shop.home') }}">
-    <span class="brand__mark brand__mark--yellow" aria-hidden="true">M</span>
+    <span class="brand__mark brand__mark--yellow" aria-hidden="true">{{ store_mark }}</span>
     <span><span class="sidenav__name">{{ store_name }}</span><span class="sidenav__area">{{ 'Administration' if ep.startswith('admin.') else 'Seller center' }}</span></span>
   </a>
   {% if ep.startswith('admin.') %}
