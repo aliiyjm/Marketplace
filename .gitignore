@@ -5,3 +5,6 @@ __pycache__/
 *.zip
 .pytest_cache/
 dist/
+
+# local tool settings (Claude Code launch configs, notes)
+.claude/
