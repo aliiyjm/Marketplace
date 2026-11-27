@@ -67,3 +67,10 @@ CREATE TABLE order_status_history (
     changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_status_history_order FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE
 );
+
+-- 7. Indexes for the queries the app runs most (the FOREIGN KEYs above already
+--    index order_id in every child table). Existing databases get them with
+--    python scripts/install_procedures.py (it only adds what is missing).
+CREATE INDEX idx_orders_buyer_created  ON orders (buyer_id, created_at);  -- My orders, sp_buyer_sales_history
+CREATE INDEX idx_orders_status_created ON orders (status, created_at);    -- admin orders filtered by status
+CREATE INDEX idx_order_items_product   ON order_items (product_id);       -- "bought it?" check before a review

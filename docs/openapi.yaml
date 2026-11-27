@@ -1,0 +1,637 @@
+openapi: 3.0.3
+info:
+  title: Straw Denim · Marketplace API (API Gateway + Lambda)
+  version: "1.0.0"
+  description: |
+    HTTP API of the clothing marketplace. One AWS Lambda (handler
+    `lambda_function.lambda_handler`) behind an API Gateway HTTP API serves the
+    19 routes below; the data lives in the DynamoDB single table `MarketplaceDB`
+    and the product photos in S3.
+
+    **Authentication:** header `x-api-key`, compared in constant time with the
+    Lambda variable `MARKETPLACE_API_KEY`. If the Lambda has no key configured
+    every protected route answers 503 (fail closed). Only the Flask backend
+    holds the key. `GET /productos/consultar` also works without the key but
+    then only returns ACTIVE products.
+
+    **Errors:** the body is always `{"error": "..."}` (plus `code` when the
+    client can act on it). Internal errors return 500 `Internal error.`; the
+    details only go to CloudWatch. A response with `{"message": ...}` instead
+    of `error` comes from API Gateway itself (route missing or not deployed).
+
+    Import this file in Postman (Import -> File) or open it in
+    https://editor.swagger.io to try the routes.
+servers:
+  - url: https://{apiId}.execute-api.{region}.amazonaws.com
+    description: API Gateway invoke URL (API_URL in .env)
+    variables:
+      apiId:
+        default: your-api-id
+      region:
+        default: us-east-1
+security:
+  - ApiKey: []
+tags:
+  - name: Productos
+    description: Catalog of 17,000 products (DynamoDB PRODUCT#)
+  - name: Inventario
+    description: Atomic stock transactions (TransactWriteItems)
+  - name: Fotos
+    description: Product photos stored in S3
+  - name: Usuarios
+    description: Accounts (DynamoDB USER#, GSI1 by email)
+  - name: Carrito
+    description: Shopping carts (DynamoDB CART#)
+  - name: Favoritos
+    description: Favorites (DynamoDB FAV#)
+
+paths:
+  /productos/consultar:
+    get:
+      tags: [Productos]
+      summary: One product, or a page of products
+      description: |
+        With `product_id` returns one product. Without it returns a page of up
+        to `limit` products (scan, or Query on GSI1 when `category` is given,
+        sorted by price). Without the API key drafts and deleted products are hidden.
+      security:
+        - ApiKey: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/ProductIdQueryOptional"
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 2000, default: 1000}
+        - name: cursor
+          in: query
+          description: next_cursor of the previous page
+          schema: {type: string}
+        - name: category
+          in: query
+          description: category slug (uses the GSI1 index)
+          schema: {type: string, pattern: "^[a-z0-9]+(-[a-z0-9]+)*$", maxLength: 60}
+      responses:
+        "200":
+          description: The product, or a page `{items, next_cursor}`
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Product"
+                  - $ref: "#/components/schemas/ProductPage"
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /productos/agregar:
+    post:
+      tags: [Productos]
+      summary: Create a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Product"}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProductIdResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "503": {$ref: "#/components/responses/NotConfigured"}
+  /productos/modificar:
+    put:
+      tags: [Productos]
+      summary: Replace an existing product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Product"}
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProductIdResult"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /productos/eliminar:
+    delete:
+      tags: [Productos]
+      summary: Soft delete (status = deleted; past orders still resolve it)
+      parameters:
+        - $ref: "#/components/parameters/ProductIdQuery"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {deleted: {type: string, example: PRD-000001}}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /productos/stock:
+    post:
+      tags: [Inventario]
+      summary: Atomic stock change of one product (never below zero)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, delta]
+              properties:
+                product_id: {$ref: "#/components/schemas/ProductId"}
+                delta: {type: integer, minimum: -10000, maximum: 10000, not: {enum: [0]}, example: -2}
+      responses:
+        "200":
+          description: New stock
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  product_id: {$ref: "#/components/schemas/ProductId"}
+                  stock: {type: integer, example: 111}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /productos/cargar:
+    post:
+      tags: [Productos]
+      summary: Bulk load (BatchWriteItem), up to 100 products per call
+      description: Used by scripts/load_to_dynamo.py to load the 17,000 products.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {$ref: "#/components/schemas/Product"}
+      responses:
+        "200":
+          description: Written
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: {written: {type: integer, example: 100}}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /productos/reservar:
+    post:
+      tags: [Inventario]
+      summary: "ATOMIC TRANSACTION 1: discount the stock of a whole order"
+      description: |
+        One TransactWriteItems: writes `RESERVATION#<order_id>` (only if it does
+        not exist) and discounts the stock of every product (only if
+        `stock >= qty`). If any condition fails NOTHING changes. Lines of the
+        same product are added up.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id, items]
+              properties:
+                order_id: {$ref: "#/components/schemas/OrderId"}
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [product_id, qty]
+                    properties:
+                      product_id: {$ref: "#/components/schemas/ProductId"}
+                      qty: {type: integer, minimum: 1, maximum: 1000}
+            example:
+              order_id: "10004"
+              items: [{product_id: PRD-000001, qty: 2}, {product_id: PRD-000005, qty: 1}]
+      responses:
+        "200":
+          description: Reserved; new stock of every product
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id: {$ref: "#/components/schemas/OrderId"}
+                  stock: {$ref: "#/components/schemas/StockMap"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409":
+          description: "OUT_OF_STOCK (a product lacks stock) or RESERVED (that order number is taken)"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /productos/liberar:
+    post:
+      tags: [Inventario]
+      summary: "ATOMIC TRANSACTION 2: give back the stock of a cancelled order (only once)"
+      description: |
+        One TransactWriteItems: reservation RESERVED -> RELEASED (condition
+        `status = RESERVED`) and `stock += qty` for every product. A second call
+        answers `released: false` and changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order_id]
+              properties:
+                order_id: {$ref: "#/components/schemas/OrderId"}
+      responses:
+        "200":
+          description: Released (or already released)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  order_id: {$ref: "#/components/schemas/OrderId"}
+                  released: {type: boolean}
+                  stock: {$ref: "#/components/schemas/StockMap"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404":
+          description: NO_RESERVATION (orders created before reservations existed)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /productos/imagen:
+    post:
+      tags: [Fotos]
+      summary: Upload the photo of a product to S3
+      description: |
+        The Flask app re-encodes the photo first (JPEG, max 1200 px, no EXIF).
+        The Lambda checks it again: strict base64, at most 1.5 MB, real type
+        (magic bytes) JPEG/PNG/WebP equal to `content_type`. Never SVG.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, content_type, data]
+              properties:
+                product_id: {$ref: "#/components/schemas/ProductId"}
+                content_type: {type: string, enum: [image/jpeg, image/png, image/webp]}
+                data: {type: string, format: byte, description: "photo in base64 (max 1.5 MB decoded)"}
+      responses:
+        "200":
+          description: Stored; URL saved in the product
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  product_id: {$ref: "#/components/schemas/ProductId"}
+                  image_url: {type: string, example: "https://my-bucket.s3.us-east-1.amazonaws.com/products/PRD-000001/0123456789abcdef0123456789abcdef.jpg"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "503":
+          description: IMAGES_DISABLED (the Lambda has no MARKETPLACE_BUCKET)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+    delete:
+      tags: [Fotos]
+      summary: Remove the photo of a product (also from S3)
+      parameters:
+        - $ref: "#/components/parameters/ProductIdQuery"
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  product_id: {$ref: "#/components/schemas/ProductId"}
+                  image_url: {type: string, example: ""}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+
+  /usuarios/consultar:
+    get:
+      tags: [Usuarios]
+      summary: All users, one by id, or one by email (GSI1)
+      parameters:
+        - name: id_user
+          in: query
+          schema: {$ref: "#/components/schemas/UserId"}
+        - name: email
+          in: query
+          schema: {type: string, format: email}
+      responses:
+        "200":
+          description: The user, or the list of users
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/User"
+                  - type: array
+                    items: {$ref: "#/components/schemas/User"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /usuarios/agregar:
+    post:
+      tags: [Usuarios]
+      summary: Create a user (409 if the id or the email exists)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/User"}
+      responses:
+        "200": {$ref: "#/components/responses/UserSaved"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /usuarios/modificar:
+    put:
+      tags: [Usuarios]
+      summary: Replace an existing user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/User"}
+      responses:
+        "200": {$ref: "#/components/responses/UserSaved"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /usuarios/eliminar:
+    delete:
+      tags: [Usuarios]
+      summary: Delete a user
+      parameters:
+        - $ref: "#/components/parameters/UserIdQuery"
+      responses:
+        "200": {$ref: "#/components/responses/Message"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /carrito/consultar:
+    get:
+      tags: [Carrito]
+      summary: The cart of a user
+      parameters:
+        - $ref: "#/components/parameters/UserIdQuery"
+      responses:
+        "200":
+          description: Cart (empty lines if it does not exist)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Cart"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /carrito/guardar:
+    put:
+      tags: [Carrito]
+      summary: Replace the cart of a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Cart"}
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id_user: {$ref: "#/components/schemas/UserId"}
+                  lines: {type: integer, example: 2}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /carrito/vaciar:
+    delete:
+      tags: [Carrito]
+      summary: Empty the cart (after checkout)
+      parameters:
+        - $ref: "#/components/parameters/UserIdQuery"
+      responses:
+        "200": {$ref: "#/components/responses/Message"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /favoritos/consultar:
+    get:
+      tags: [Favoritos]
+      summary: The favorites of a user
+      parameters:
+        - $ref: "#/components/parameters/UserIdQuery"
+      responses:
+        "200":
+          description: Favorites
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Favorites"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /favoritos/guardar:
+    put:
+      tags: [Favoritos]
+      summary: Replace the favorites of a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Favorites"}
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id_user: {$ref: "#/components/schemas/UserId"}
+                  items: {type: integer, example: 3}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Same value as MARKETPLACE_API_KEY in the Lambda (never in the code or in Git)
+
+  parameters:
+    ProductIdQuery:
+      name: product_id
+      in: query
+      required: true
+      schema: {$ref: "#/components/schemas/ProductId"}
+    ProductIdQueryOptional:
+      name: product_id
+      in: query
+      required: false
+      schema: {$ref: "#/components/schemas/ProductId"}
+    UserIdQuery:
+      name: id_user
+      in: query
+      required: true
+      schema: {$ref: "#/components/schemas/UserId"}
+
+  schemas:
+    ProductId: {type: string, pattern: "^PRD-[0-9]{6}$", example: PRD-000001}
+    UserId: {type: string, pattern: "^[A-Za-z0-9_-]{1,30}$", example: u-ana00001}
+    OrderId: {type: string, pattern: "^[0-9]{1,12}$", example: "10004"}
+    StockMap:
+      type: object
+      additionalProperties: {type: integer}
+      example: {PRD-000001: 21, PRD-000005: 72}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string, example: "Only 0 left of Relaxed Ruffle Blouse."}
+        code:
+          type: string
+          enum: [OUT_OF_STOCK, NOT_FOUND, EXISTS, EMAIL_EXISTS, RESERVED, NO_RESERVATION, IMAGES_DISABLED]
+    Product:
+      type: object
+      required: [product_id, name, category_id, category_slug, seller_id, price, stock, sizes, colors]
+      properties:
+        product_id: {$ref: "#/components/schemas/ProductId"}
+        name: {type: string, maxLength: 120, example: Weekend Shirt Dress}
+        description: {type: string, maxLength: 2000}
+        category_id: {type: integer, minimum: 1, example: 11}
+        category_slug: {type: string, example: women-dresses}
+        seller_id: {type: string, pattern: "^SEL-[0-9]{4,8}$", example: SEL-0001}
+        price: {type: string, pattern: "^[0-9]+\\.[0-9]{2}$", example: "1099.00", description: "MXN, IVA included, as text (no float rounding)"}
+        stock: {type: integer, minimum: 0, maximum: 99999}
+        status: {type: string, enum: [active, draft, deleted], default: active}
+        sizes: {type: array, minItems: 1, maxItems: 20, items: {type: string, maxLength: 20}}
+        colors: {type: array, minItems: 1, maxItems: 12, items: {type: string, maxLength: 30}}
+        color_key: {type: string, example: red}
+        kind: {type: string, enum: [tshirt, dress, pants, jacket, shoe, bag, cap, glasses, belt]}
+        attributes:
+          type: object
+          maxProperties: 15
+          additionalProperties: {type: string, maxLength: 120}
+          example: {Material: Linen, Fit: Relaxed}
+        threshold_limit: {type: integer, minimum: 0, maximum: 9999}
+        image_url: {type: string, description: "only URLs of the app's own S3 bucket"}
+        created_at: {type: string}
+    ProductPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Product"}}
+        next_cursor: {type: string, nullable: true}
+    ProductIdResult:
+      type: object
+      properties:
+        product_id: {$ref: "#/components/schemas/ProductId"}
+    User:
+      type: object
+      required: [id_user, name, email]
+      properties:
+        id_user: {$ref: "#/components/schemas/UserId"}
+        name: {type: string, maxLength: 80, example: Ana López}
+        email: {type: string, format: email, example: ana@example.com}
+        role: {type: string, enum: [buyer, seller, admin], default: buyer}
+        password_hash:
+          type: string
+          maxLength: 300
+          description: "scrypt/pbkdf2 hash made by the app (never a plain password); '!' = cannot sign in"
+        created_at: {type: string}
+    Cart:
+      type: object
+      required: [id_user, lines]
+      properties:
+        id_user: {$ref: "#/components/schemas/UserId"}
+        lines:
+          type: array
+          maxItems: 30
+          items:
+            type: object
+            required: [line_id, product_id, size, color, qty]
+            properties:
+              line_id: {type: string, pattern: "^[0-9a-f]{12}$"}
+              product_id: {$ref: "#/components/schemas/ProductId"}
+              size: {type: string}
+              color: {type: string}
+              qty: {type: integer, minimum: 1, maximum: 10}
+        updated_at: {type: string}
+    Favorites:
+      type: object
+      required: [id_user, items]
+      properties:
+        id_user: {$ref: "#/components/schemas/UserId"}
+        items:
+          type: object
+          maxProperties: 200
+          description: product_id -> date it was added
+          additionalProperties: {type: string}
+          example: {PRD-000001: "2026-11-20T10:00:00"}
+
+  responses:
+    BadRequest:
+      description: Invalid input (every field is validated)
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Forbidden:
+      description: Missing or wrong x-api-key
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: NOT_FOUND
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Conflict:
+      description: EXISTS / EMAIL_EXISTS / OUT_OF_STOCK
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotConfigured:
+      description: The Lambda has no MARKETPLACE_API_KEY (writes refused)
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Message:
+      description: Done
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: {message: {type: string}}
+    UserSaved:
+      description: Saved
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: {type: string, example: User added successfully}
+              id_user: {$ref: "#/components/schemas/UserId"}

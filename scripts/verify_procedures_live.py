@@ -43,13 +43,13 @@ def raises(fn, error_type, text=""):
 
 
 def finance_ddl():
-    """CREATE TABLE statements of finance_db.sql WITHOUT its DROP/CREATE/USE DATABASE lines."""
+    """CREATE TABLE / CREATE INDEX statements of finance_db.sql WITHOUT its DROP/CREATE/USE DATABASE lines."""
     text = (ROOT / "database" / "finance_db.sql").read_text(encoding="utf-8")
-    code = "\n".join(line for line in text.splitlines() if not line.strip().startswith("--"))
+    code = "\n".join(line.split("--", 1)[0] for line in text.splitlines())   # drop every -- comment
     statements = [s.strip() for s in code.split(";") if s.strip()]
     keep = [s for s in statements if not s.upper().startswith(("DROP DATABASE", "CREATE DATABASE", "USE "))]
     for s in keep:
-        if not s.upper().startswith("CREATE TABLE"):
+        if not s.upper().startswith(("CREATE TABLE", "CREATE INDEX")):
             raise SystemExit(f"Refusing to run an unexpected statement: {s[:60]}")
     return keep
 
@@ -165,6 +165,19 @@ def run_mysql():
               h["orders_count"] == 3 and h["active_orders"] == 1 and h["total_spent"] == Decimal("599.00")
               and h["units_bought"] == 1, {k: v for k, v in h.items() if k != "orders"})
         check("unknown buyer -> empty history", repo.buyer_history("nobody")["orders_count"] == 0)
+
+        print(" database/finance_seed.sql (example data through the procedures)")
+        seed = (ROOT / "database" / "finance_seed.sql").read_text(encoding="utf-8")
+        code = "\n".join(line.split("--", 1)[0] for line in seed.splitlines())
+        with db.transaction() as cur:
+            for statement in (x.strip() for x in code.split(";") if x.strip()):
+                cur.call(statement)
+        h = repo.buyer_history("u-ana00001")
+        check("3 example orders, 2 not cancelled, $2,796.00 spent",
+              (h["orders_count"], h["active_orders"], h["total_spent"]) == (3, 2, Decimal("2796.00")),
+              {k: v for k, v in h.items() if k != "orders"})
+        check("example order 90001 is SHIPPED with its invoice",
+              repo.get_order(90001)["order"]["status"] == "Shipped" and repo.get_order(90001)["invoice"])
     finally:
         with admin.cursor() as cur:
             cur.execute(f"DROP DATABASE IF EXISTS `{temp}`")
@@ -220,10 +233,28 @@ def run_postgres():
               {today.isoformat(): 7, (today - timedelta(days=1)).isoformat(): 1})
         check("top_products uses the function", repo.top_products("SEL-0001", since, 1) == [("PRD-000002", 5)])
         check("another seller sees nothing", repo.seller_history("SEL-0099", since) == [])
+
+        print(" database/operations_seed.sql (initial data)")
+        with psycopg.connect(**base, autocommit=True) as admin:
+            admin.execute(f'CREATE SCHEMA "{temp}_seed"')
+        seed_db = SqlDatabase(lambda: psycopg.connect(**dict(base, options=f"-c search_path={temp}_seed")),
+                              "postgres", f"PostgreSQL {temp}_seed")
+        seed = (ROOT / "database" / "operations_seed.sql").read_text(encoding="utf-8")
+        body = "\n".join(line for line in seed.splitlines() if line.strip() not in ("BEGIN;", "COMMIT;"))
+        with seed_db.transaction() as cur:
+            if cur.execute("SELECT current_schema() AS s").fetchone()["s"] != f"{temp}_seed":
+                raise SystemExit("Refusing to continue: wrong schema for the seed test")
+            cur._cursor.execute((ROOT / "database" / "operations_db.sql").read_text(encoding="utf-8"))
+            cur._cursor.execute(body)
+            counts = {t: int(cur.execute(f"SELECT COUNT(*) AS n FROM {t}").fetchone()["n"])
+                      for t in ("categories", "sellers", "reviews", "analytics", "alerts")}
+        check("seed loads with every constraint", counts["categories"] == 29 and counts["sellers"] == 12
+              and counts["reviews"] > 27000, counts)
     finally:
         with psycopg.connect(**base, autocommit=True) as admin:
             admin.execute(f'DROP SCHEMA IF EXISTS "{temp}" CASCADE')
-        print(f"  (temporary schema {temp} deleted)")
+            admin.execute(f'DROP SCHEMA IF EXISTS "{temp}_seed" CASCADE')
+        print(f"  (temporary schemas {temp} and {temp}_seed deleted)")
 
 
 def main():

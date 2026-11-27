@@ -248,7 +248,8 @@ def test_script_splitter_handles_delimiters_and_comments():
 
 def test_live_test_never_drops_the_real_database():
     statements = finance_ddl()
-    assert statements and all(s.upper().startswith("CREATE TABLE") for s in statements)
+    assert statements and all(s.upper().startswith(("CREATE TABLE", "CREATE INDEX")) for s in statements)
+    assert sum(s.upper().startswith("CREATE INDEX") for s in statements) == 3
     assert not any("DATABASE" in s.upper() or s.upper().startswith("USE") for s in statements)
 
 
@@ -264,3 +265,12 @@ def test_seller_dashboard_shows_days_with_sales(client):
     login(client, "carlos@urbanthread.mx")
     html = client.get("/seller").get_data(as_text=True)
     assert "Days with sales" in html and "Last sale" in html
+
+
+def test_finance_indexes_cover_the_frequent_queries():
+    from scripts.install_procedures import finance_indexes
+    indexes = {name: sql for name, _, sql in finance_indexes()}
+    assert indexes == {
+        "idx_orders_buyer_created": "CREATE INDEX idx_orders_buyer_created ON orders (buyer_id, created_at)",
+        "idx_orders_status_created": "CREATE INDEX idx_orders_status_created ON orders (status, created_at)",
+        "idx_order_items_product": "CREATE INDEX idx_order_items_product ON order_items (product_id)"}

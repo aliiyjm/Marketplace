@@ -13,12 +13,37 @@ Implementation/  business rules; DataSource/ holds the in-memory tables of the
 View/MainViews/  PY (Flask routes + security), HTML (Jinja templates), CSS, JS, Utils
 tests/           automated tests (pytest), including a fake DynamoDB table
 scripts/         build_single_file_lambda.py (generates lambda_deploy/lambda_function.py),
-                 load_to_dynamo.py (demo users + 17,000 products), load_to_sql.py (PostgreSQL demo data),
-                 check_databases.py (verifies connections, tables and columns)
-lambda_deploy/   lambda_function.py: the whole Lambda (users + products) in one file, to paste in AWS
-docs/            BASES_DE_DATOS.md: connect MySQL + PostgreSQL (.env, load, verify)
-                 DYNAMODB_LAMBDA.md: step-by-step AWS setup (single table MarketplaceDB)
+                 load_to_dynamo.py (demo users + 17,000 products, BatchWriteItem), load_to_sql.py
+                 (PostgreSQL demo data), export_seed_sql.py (writes that data as SQL), check_databases.py
+                 (connections, tables, procedures, API routes), install_procedures.py,
+                 verify_procedures_live.py (tests the procedures on a temporary database),
+                 aws_deploy.py (deploys/checks AWS with the Learner Lab credentials)
+lambda_deploy/   lambda_function.py: the whole Lambda in one file, generated from the layers
+database/        DDL, stored procedures, initial data (DML) and the DynamoDB schema
+docs/            diagrams, OpenAPI and the step-by-step guides (Spanish)
 ```
+
+## Project deliverables (checklist of the course rubric)
+
+| Deliverable | File |
+|---|---|
+| SQL tables (DDL) | [database/finance_db.sql](database/finance_db.sql) (MySQL, 6 tables + indexes), [database/operations_db.sql](database/operations_db.sql) (PostgreSQL, 5 tables) |
+| Initial data (DML) | [database/operations_seed.sql](database/operations_seed.sql) (29 categories, 12 sellers, 27,068 reviews, sales, alerts), [database/finance_seed.sql](database/finance_seed.sql) (example orders written through the procedures) |
+| Stored procedures (separate script) | [database/finance_procedures.sql](database/finance_procedures.sql) (4 MySQL procedures), [database/operations_procedures.sql](database/operations_procedures.sql) (2 PostgreSQL functions) — explained in [docs/STORED_PROCEDURES.md](docs/STORED_PROCEDURES.md) |
+| DynamoDB schema and indexing | [database/dynamodb_schema.json](database/dynamodb_schema.json) (create-table input), [database/dynamodb_entities.json](database/dynamodb_entities.json) (entities, keys, access patterns) |
+| Entity-Relationship diagram | [docs/DIAGRAMA_ER.md](docs/DIAGRAMA_ER.md) (16 entities in 3 databases, Mermaid) |
+| AWS architecture diagram | [docs/ARQUITECTURA_AWS.md](docs/ARQUITECTURA_AWS.md) (C4 containers, security, purchase and cancel flows) |
+| API specification | [docs/openapi.yaml](docs/openapi.yaml) (OpenAPI 3.0, 19 routes; import it in Postman or Swagger Editor) |
+| Deployment manual | [docs/DESPLIEGUE_AWS.md](docs/DESPLIEGUE_AWS.md), [docs/BASES_DE_DATOS.md](docs/BASES_DE_DATOS.md), [docs/DYNAMODB_LAMBDA.md](docs/DYNAMODB_LAMBDA.md), [docs/FOTOS_S3.md](docs/FOTOS_S3.md) |
+| Source code | backend and frontend below; automated tests in `tests/` |
+
+**Where the backend and the frontend are** (the professor's layered architecture replaces `/src`):
+
+| Part | Folders |
+|---|---|
+| Backend (Flask, Python) | `View/MainViews/PY/` (routes, security) → `Services/` → `Interfaces/` → `Implementation/` |
+| Backend (AWS Lambda) | `Services/LambdaRouter.py` and `Services/*/…LambdaService.py`, generated into `lambda_deploy/lambda_function.py` |
+| Frontend | `View/MainViews/HTML/` (Jinja templates), `View/MainViews/CSS/`, `View/MainViews/JS/`, `View/MainViews/IMG/` |
 
 The Lambda reuses the same layers: `Services/LambdaRouter` → `Services/ProductService` and
 `Services/UserService/UserLambdaService` (routes) → `Interfaces/ProductServiceInterface` and
@@ -41,6 +66,9 @@ python View/MainViews/PY/app.py
 ```
 
 Open http://127.0.0.1:5000
+
+Quick demo without AWS (data in memory, nothing is saved): `MARKETPLACE_ENV_FILE=none python View/MainViews/PY/app.py`
+(Git Bash; in cmd first `set MARKETPLACE_ENV_FILE=none`).
 
 Demo accounts (password `Demo1234`):
 

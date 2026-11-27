@@ -1,0 +1,98 @@
+{
+  "table": "MarketplaceDB",
+  "design": "Single-table design: every entity lives in one table with a composite key (PK = partition key, SK = sort key). The optional GSI1 (GSI1PK, GSI1SK) gives a second access path. Create the table with: aws dynamodb create-table --cli-input-json file://database/dynamodb_schema.json",
+  "capacity": "PAY_PER_REQUEST (On-Demand), as the AWS Learner Lab rules ask",
+  "indexing_policy": {
+    "primary_key": "PK + SK: direct GetItem/PutItem/UpdateItem of one entity, never a scan for single reads",
+    "GSI1": "sparse index: only items that have GSI1PK are in it (users and products). Users by email (sign-in, unique email) and products by category sorted by price. Projection ALL so a query never needs a second read.",
+    "not_indexed_on_purpose": "carts, favorites and stock reservations are always read by their own key (PK = owner or order), so they have no GSI attributes and cost nothing in the index"
+  },
+  "entities": [
+    {
+      "entity": "USER",
+      "PK": "USER#<id_user>",
+      "SK": "PROFILE",
+      "GSI1PK": "EMAIL#<email>",
+      "GSI1SK": "USER#<id_user>",
+      "attributes": {
+        "id_user": "string, [A-Za-z0-9_-]{1,30}",
+        "name": "string",
+        "email": "string, lowercase, unique (checked through GSI1)",
+        "role": "buyer | seller | admin",
+        "password_hash": "werkzeug scrypt hash (never the password)",
+        "created_at": "ISO date-time"
+      },
+      "written_by": "Lambda routes /usuarios/* (UserDynamoImplementation)"
+    },
+    {
+      "entity": "PRODUCT",
+      "PK": "PRODUCT#<product_id>  (PRD-000001 .. PRD-017000)",
+      "SK": "METADATA",
+      "GSI1PK": "CATEGORY#<category slug>",
+      "GSI1SK": "PRICE#<price with 10 characters, e.g. 0000499.00>",
+      "attributes": {
+        "product_id": "string PRD-######",
+        "name": "string", "description": "string",
+        "category_id": "number (PostgreSQL categories)", "category_slug": "string",
+        "seller_id": "string SEL-#### (PostgreSQL sellers)",
+        "price": "number (MXN, IVA included)", "stock": "number >= 0 (inventory)",
+        "status": "active | draft | deleted",
+        "sizes": "list of strings", "colors": "list of strings",
+        "color_key": "string", "kind": "string (SVG silhouette)",
+        "attributes": "map: flexible attributes (material, fit, care...)",
+        "threshold_limit": "number: low stock alert level",
+        "image_url": "optional string: photo in the S3 bucket",
+        "created_at": "ISO date-time"
+      },
+      "written_by": "Lambda routes /productos/* (ProductServiceImplementation); 17,000 items loaded with BatchWriteItem by scripts/load_to_dynamo.py"
+    },
+    {
+      "entity": "CART",
+      "PK": "CART#<id_user>",
+      "SK": "CART",
+      "attributes": {
+        "id_user": "string",
+        "lines": "list (max 30) of {line_id (12 hex), product_id, size, color, qty 1..10}",
+        "updated_at": "ISO date-time"
+      },
+      "written_by": "Lambda routes /carrito/*"
+    },
+    {
+      "entity": "FAV",
+      "PK": "FAV#<id_user>",
+      "SK": "FAV",
+      "attributes": {
+        "id_user": "string",
+        "items": "map (max 200) product_id -> added_at"
+      },
+      "written_by": "Lambda routes /favoritos/*"
+    },
+    {
+      "entity": "STOCK_RESERVATION",
+      "PK": "RESERVATION#<order_id>",
+      "SK": "STOCK",
+      "attributes": {
+        "order_id": "string (MySQL orders.order_id)",
+        "status": "RESERVED | RELEASED",
+        "items": "map product_id -> units taken from stock",
+        "created_at": "ISO date-time", "released_at": "ISO date-time (when cancelled)"
+      },
+      "written_by": "atomic TransactWriteItems of /productos/reservar (with the stock discount) and /productos/liberar (with the restock)"
+    }
+  ],
+  "access_patterns": [
+    { "need": "sign in: user by email", "operation": "Query GSI1", "key": "GSI1PK = EMAIL#<email>" },
+    { "need": "user by id (session reload)", "operation": "GetItem", "key": "PK = USER#<id>, SK = PROFILE" },
+    { "need": "product page", "operation": "GetItem", "key": "PK = PRODUCT#<id>, SK = METADATA" },
+    { "need": "products of a category sorted by price", "operation": "Query GSI1", "key": "GSI1PK = CATEGORY#<slug>, GSI1SK ascending/descending" },
+    { "need": "load the whole catalog at app start", "operation": "Scan with filter begins_with(PK, 'PRODUCT#') AND SK = 'METADATA', pages of 1,000", "key": "-" },
+    { "need": "buy the last unit safely", "operation": "TransactWriteItems / UpdateItem with ConditionExpression stock >= :qty", "key": "PK = PRODUCT#<id>" },
+    { "need": "cart of a user", "operation": "GetItem / PutItem", "key": "PK = CART#<id_user>, SK = CART" },
+    { "need": "favorites of a user", "operation": "GetItem / PutItem", "key": "PK = FAV#<id_user>, SK = FAV" },
+    { "need": "stock reservation of an order", "operation": "GetItem (ConsistentRead) + TransactWriteItems", "key": "PK = RESERVATION#<order_id>, SK = STOCK" }
+  ],
+  "related_relational_data": {
+    "MySQL finance_db": "orders.buyer_id -> USER.id_user; order_items.product_id -> PRODUCT.product_id; orders.order_id -> STOCK_RESERVATION.order_id",
+    "PostgreSQL": "categories.category_id -> PRODUCT.category_id; sellers.seller_id -> PRODUCT.seller_id; sellers.user_id -> USER.id_user; reviews/analytics/alerts.product_id -> PRODUCT.product_id"
+  }
+}

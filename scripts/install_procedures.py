@@ -4,14 +4,16 @@
     python scripts/install_procedures.py --yes      no question (for scripts)
 
 - MySQL finance_db  <- database/finance_procedures.sql    (4 procedures)
+                       + the indexes of finance_db.sql that are missing
 - PostgreSQL        <- database/operations_procedures.sql (2 functions)
 
 It only runs DROP PROCEDURE IF EXISTS / CREATE PROCEDURE / CREATE OR REPLACE
-FUNCTION: tables and data are never touched, so it is safe to run again after
-every change. Connection settings come from your .env (same as the app).
+FUNCTION / CREATE INDEX (only missing ones): data is never deleted or changed,
+so it is safe to run again after every change. Connection settings come from your .env (same as the app).
 """
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +26,22 @@ MYSQL_FILE = ROOT / "database" / "finance_procedures.sql"
 POSTGRES_FILE = ROOT / "database" / "operations_procedures.sql"
 MYSQL_ROUTINES = ("sp_create_order", "sp_change_order_status", "sp_cancel_order", "sp_buyer_sales_history")
 POSTGRES_ROUTINES = ("fn_seller_sales_history", "fn_seller_units_by_day")
+FINANCE_DDL = ROOT / "database" / "finance_db.sql"
+
+
+def finance_indexes():
+    """[(index, table, sql)] of the CREATE INDEX statements in finance_db.sql."""
+    pattern = re.compile(r"^CREATE INDEX (\w+)\s+ON (\w+) \(([\w, ]+)\);", re.M)
+    text = FINANCE_DDL.read_text(encoding="utf-8")
+    return [(m.group(1), m.group(2), f"CREATE INDEX {m.group(1)} ON {m.group(2)} ({m.group(3)})")
+            for m in pattern.finditer(text)]
+
+
+def missing_indexes(cur):
+    have = {(r["t"], r["i"]) for r in cur.execute(
+        "SELECT TABLE_NAME AS t, INDEX_NAME AS i FROM information_schema.STATISTICS "
+        "WHERE TABLE_SCHEMA = DATABASE()").fetchall()}
+    return [(name, table, sql) for name, table, sql in finance_indexes() if (table, name) not in have]
 
 
 def split_mysql_script(text):
@@ -65,7 +83,11 @@ def install_mysql(db, out=print):
             raise RuntimeError(f"MySQL {version} is too old: the procedures need 8.0.4+ (JSON_TABLE).")
         for statement in mysql_statements():
             cur._cursor.execute(statement)       # no parameters: the text is our own file
+        added = missing_indexes(cur)
+        for _, _, sql in added:
+            cur._cursor.execute(sql)
     out(f"  ✓ {len(MYSQL_ROUTINES)} procedures installed (MySQL {version})")
+    out(f"  ✓ indexes: {len(finance_indexes())} expected, {len(added)} added now")
 
 
 def install_postgres(db, out=print):

@@ -38,6 +38,9 @@ CREATE TABLE order_status_history (
     history_id INTEGER PRIMARY KEY AUTOINCREMENT, order_id VARCHAR(50) NOT NULL, old_status VARCHAR(20),
     new_status VARCHAR(20) NOT NULL, changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE);
+CREATE INDEX idx_orders_buyer_created ON orders (buyer_id, created_at);
+CREATE INDEX idx_orders_status_created ON orders (status, created_at);
+CREATE INDEX idx_order_items_product ON order_items (product_id);
 """
 
 OPERATIONS = """
