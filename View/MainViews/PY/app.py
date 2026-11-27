@@ -32,7 +32,7 @@ from View.MainViews.PY import (account_views, admin_views, auth_views,  # noqa: 
 from View.MainViews.PY.security import init_security, services  # noqa: E402
 
 STORE_NAME = "Straw Denim"     # name shown in every page, invoice and the browser tab
-STORE_MARK = "SD"              # initials in the logo square
+STORE_LOGO = "logo.png"        # View/MainViews/IMG: 32x32 pixel art (tab icon); logo@2x/@4x = header, logo-192 = phones
 
 
 def _money(value):
@@ -76,14 +76,14 @@ def create_app(container=None, config=None):
         uid = g.user.id_user if g.get("user") else None
         return {
             "store_name": STORE_NAME,
-            "store_mark": STORE_MARK,
+            "store_logo": STORE_LOGO,
             "current_user": g.get("user"),
             "cart_count": svc.cart_count.for_user(uid),
             "fav_ids": svc.fav.ids(uid) if uid else set(),
             "top_categories": svc.main.categories(),
         }
 
-    # Static files: only the CSS and JS folders are served.
+    # Static files: only the CSS, JS and IMG folders are served.
     @app.get("/static/css/<path:filename>")
     def static_css(filename):
         return send_from_directory(BASE / "CSS", filename)
@@ -91,6 +91,10 @@ def create_app(container=None, config=None):
     @app.get("/static/js/<path:filename>")
     def static_js(filename):
         return send_from_directory(BASE / "JS", filename)
+
+    @app.get("/static/img/<path:filename>")
+    def static_img(filename):
+        return send_from_directory(BASE / "IMG", filename)
 
     for module in (shop_views, auth_views, cart_views, account_views, seller_views, admin_views):
         app.register_blueprint(module.bp)

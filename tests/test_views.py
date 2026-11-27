@@ -202,3 +202,13 @@ def test_register_then_seller_center(client):
         "confirm": "Moda2026", "role": "seller", "store_name": "Rosa Moda", "tax_id": "PERR850101AB1", "terms": "1"})
     assert resp.status_code == 302 and resp.location.endswith("/seller")
     assert "Hello, Rosa Moda" in page(client, "/seller")
+
+
+def test_store_logo_is_served_and_used(client):
+    html = client.get("/").get_data(as_text=True)
+    assert 'class="brand__logo"' in html and 'rel="icon" type="image/png"' in html and "Straw Denim" in html
+    for name in ("logo.png", "logo@2x.png", "logo@4x.png", "logo-192.png"):
+        resp = client.get(f"/static/img/{name}")
+        assert resp.status_code == 200 and resp.mimetype == "image/png"
+    assert client.get("/static/img/../PY/app.py").status_code == 404
+    assert client.get("/static/img/%2e%2e/PY/app.py").status_code == 404

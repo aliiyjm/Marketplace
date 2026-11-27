@@ -5,7 +5,7 @@
 {%- endmacro %}
 <aside class="sidenav">
   <a class="sidenav__brand" href="{{ url_for('shop.home') }}">
-    <span class="brand__mark brand__mark--yellow" aria-hidden="true">{{ store_mark }}</span>
+    <img class="brand__logo" src="{{ url_for('static_img', filename='logo@2x.png') }}" srcset="{{ url_for('static_img', filename='logo@2x.png') }} 1x, {{ url_for('static_img', filename='logo@4x.png') }} 2x" width="64" height="64" alt="">
     <span><span class="sidenav__name">{{ store_name }}</span><span class="sidenav__area">{{ 'Administration' if ep.startswith('admin.') else 'Seller center' }}</span></span>
   </a>
   {% if ep.startswith('admin.') %}

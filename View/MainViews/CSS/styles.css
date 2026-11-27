@@ -132,6 +132,9 @@ legend { padding: 0; }
 .brand:hover { color: var(--ink); }
 .brand__mark { width: 36px; height: 36px; border-radius: 9px; background: var(--ink); color: var(--yellow); display: inline-flex; align-items: center; justify-content: center; font: 700 16px var(--display); letter-spacing: -0.5px; flex: none; }
 .brand__mark--yellow { background: var(--yellow); color: var(--ink); }
+/* Pixel-art logo (32x32 drawn): shown at exactly 2x and never smoothed, so every pixel
+   stays square. The negative margins eat its transparent border: the header keeps its height. */
+.brand__logo { width: 64px; height: 64px; margin: -12px -8px -12px -10px; flex: none; image-rendering: pixelated; }
 .brand__name { font: 700 21px var(--display); }
 .search { flex: 1 1 360px; display: flex; min-width: 0; border: 2px solid var(--ink); border-radius: 10px; overflow: hidden; background: #fff; }
 .search select { border: 0; border-right: 1px solid var(--line); background: var(--soft); padding: 0 10px; font-size: 14px; max-width: 140px; }
