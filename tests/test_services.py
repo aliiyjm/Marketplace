@@ -233,7 +233,7 @@ def test_dashboard_has_kpis_and_14_days(services):
 def test_password_is_hashed(services):
     record = services.store.users[ANA]
     assert "Demo1234" not in record["password_hash"]
-    assert record["password_hash"].startswith(("scrypt:", "pbkdf2:"))
+    assert record["password_hash"].startswith("$argon2id$")
 
 
 def test_login_lockout_after_five_failures(services):

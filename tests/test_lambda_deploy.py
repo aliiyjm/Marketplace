@@ -239,5 +239,5 @@ def test_register_creates_the_user_in_dynamodb(aws_app):
         "confirm": "Moda2026", "role": "buyer", "terms": "1"})
     assert resp.status_code == 302
     stored = [i for i in table.items.values() if i.get("email") == "rosa@moda.mx"]
-    assert stored and stored[0]["password_hash"].startswith(("scrypt:", "pbkdf2:"))
+    assert stored and stored[0]["password_hash"].startswith("$argon2id$")       # Argon2id in DynamoDB
     assert stored[0]["GSI1PK"] == "EMAIL#rosa@moda.mx"

@@ -11,7 +11,7 @@ import secrets
 from datetime import timedelta
 from decimal import Decimal
 
-from werkzeug.security import generate_password_hash
+from Implementation.AuthServiceImplementation.Passwords import hash_password
 
 from Implementation.DataSource.Inventory import refresh_alert
 from Implementation.DataSource.Mappers import refresh_rating, search_text
@@ -177,7 +177,7 @@ def _user(store, id_user, name, email, role, password=None, created=None):
         "PK": f"USER#{id_user}", "SK": "PROFILE",
         "id_user": id_user, "name": name, "email": email, "role": role,
         # Unusable hash for seeded customers: nobody can sign in as them.
-        "password_hash": generate_password_hash(password) if password else "!" + secrets.token_hex(8),
+        "password_hash": hash_password(password) if password else "!" + secrets.token_hex(8),
         "created_at": (created or store.now()).isoformat(),
     }
 

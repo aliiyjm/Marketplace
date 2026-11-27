@@ -1,6 +1,6 @@
 """UserService: admin CRUD of users (query, add, update, delete).
 Receives raw input, validates it with UserDTO and delegates to UserServiceImplementation."""
-from werkzeug.security import generate_password_hash
+from Implementation.AuthServiceImplementation.Passwords import hash_password
 
 from Interfaces.AuthServiceInterface.AuthDTO import check_password_policy
 from Interfaces.UserServiceInterface.UserDTO import ROLES, UserForm
@@ -26,7 +26,7 @@ class UserService:
             problems = check_password_policy(temp)
             if problems:
                 raise ValidationError(problems)
-        password_hash = generate_password_hash(temp) if temp else "!"   # "!" = cannot sign in
+        password_hash = hash_password(temp) if temp else "!"   # Argon2id; "!" = cannot sign in
         return self.impl.create(form, password_hash=password_hash, created_at=created_at)
 
     def update(self, user_id, form_data):

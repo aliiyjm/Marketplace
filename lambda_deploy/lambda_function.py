@@ -460,7 +460,7 @@ class ProductItem:
 USER_PK_PREFIX = "USER#"
 USER_SK = "PROFILE"
 EMAIL_PREFIX = "EMAIL#"
-HASH_PREFIXES = ("scrypt:", "pbkdf2:", "!")
+HASH_PREFIXES = ("$argon2id$", "scrypt:", "pbkdf2:", "!")   # Argon2id now; scrypt/pbkdf2 = older accounts
 
 
 @dataclass(frozen=True)

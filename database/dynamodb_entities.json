@@ -19,7 +19,7 @@
         "name": "string",
         "email": "string, lowercase, unique (checked through GSI1)",
         "role": "buyer | seller | admin",
-        "password_hash": "werkzeug scrypt hash (never the password)",
+        "password_hash": "Argon2id hash (older accounts: scrypt, upgraded on their next sign-in); never the password",
         "created_at": "ISO date-time"
       },
       "written_by": "Lambda routes /usuarios/* (UserDynamoImplementation)"

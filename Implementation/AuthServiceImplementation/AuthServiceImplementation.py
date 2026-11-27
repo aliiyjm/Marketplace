@@ -1,7 +1,8 @@
 """Sign-in, registration and session user.
 
 Security notes:
-- Passwords are hashed with werkzeug's scrypt (salted). Plain text never stored.
+- Passwords are hashed with Argon2id (Passwords.py). Older scrypt hashes still
+  work and are upgraded to Argon2id on the next successful sign-in.
 - 5 failed attempts lock the email for 15 minutes (slows down brute force).
 - The same generic message is used for "unknown email" and "wrong password",
   and a dummy hash is checked for unknown emails so response time does not
@@ -9,8 +10,10 @@ Security notes:
 """
 from datetime import timedelta
 
-from werkzeug.security import check_password_hash, generate_password_hash
+import logging
 
+from Implementation.AuthServiceImplementation.Passwords import (burn_time, hash_password, needs_rehash,
+                                                                verify_password)
 from Interfaces.AuthServiceInterface.AuthDTO import SessionUserDTO
 from Interfaces.AuthServiceInterface.AuthServiceInterface import AuthServiceInterface
 from Interfaces.UserServiceInterface.UserDTO import UserForm
@@ -19,7 +22,7 @@ from Interfaces.Validators import ValidationError
 MAX_ATTEMPTS = 5
 LOCK_MINUTES = 15
 GENERIC_ERROR = "Email or password is incorrect."
-_DUMMY_HASH = generate_password_hash("not-a-real-password")
+log = logging.getLogger("auth")
 
 
 class AuthServiceImplementation(AuthServiceInterface):
@@ -43,22 +46,32 @@ class AuthServiceImplementation(AuthServiceInterface):
             raise ValidationError(f"Too many failed attempts. Try again in {LOCK_MINUTES} minutes.")
         record = self.users.get_by_email(form.email)
         stored_hash = str((record or {}).get("password_hash", ""))
-        if record and stored_hash.count("$") >= 2:
-            ok = check_password_hash(stored_hash, form.password)
+        if record:
+            ok = verify_password(stored_hash, form.password)
         else:
-            check_password_hash(_DUMMY_HASH, form.password)   # same cost as a real check
+            burn_time(form.password)                          # same cost as a real check
             ok = False
         if not ok:
             self._fail(form.email)
             raise ValidationError(GENERIC_ERROR)
         self._attempts.pop(form.email, None)
+        if needs_rehash(stored_hash):
+            self._upgrade_hash(record["id_user"], form.password)
         return self._to_session(record)
+
+    def _upgrade_hash(self, user_id, password):
+        """scrypt -> Argon2id now that the plain password is known. If saving fails
+        the sign-in still works; it is retried on the next one."""
+        try:
+            self.users.set_password_hash(user_id, hash_password(password))
+        except ValidationError:
+            log.warning("Could not upgrade the password hash of %s", user_id)
 
     def register(self, form):
         if self.users.get_by_email(form.email):
             raise ValidationError("That email is already registered. Sign in instead.")
         user_form = UserForm(name=form.name, email=form.email, role=form.role)
-        user_id = self.users.create(user_form, password_hash=generate_password_hash(form.password),
+        user_id = self.users.create(user_form, password_hash=hash_password(form.password),
                                     created_at=self.store.now().isoformat())
         if form.role == "seller":
             self.store.ops.create_seller({
@@ -81,4 +94,4 @@ class AuthServiceImplementation(AuthServiceInterface):
 
     @staticmethod
     def hash_password(password):
-        return generate_password_hash(password)
+        return hash_password(password)

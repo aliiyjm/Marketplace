@@ -585,7 +585,7 @@ components:
         password_hash:
           type: string
           maxLength: 300
-          description: "scrypt/pbkdf2 hash made by the app (never a plain password); '!' = cannot sign in"
+          description: "Argon2id hash made by the app (older accounts: scrypt until their next sign-in); never a plain password; '!' = cannot sign in"
         created_at: {type: string}
     Cart:
       type: object

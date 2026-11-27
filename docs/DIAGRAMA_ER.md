@@ -197,7 +197,7 @@ erDiagram
         string gsi1_sort "USER#id_user"
         string name
         string role "buyer seller admin"
-        string password_hash "scrypt, nunca la contrasena"
+        string password_hash "Argon2id, nunca la contrasena"
     }
     PRODUCT {
         string partition_key PK "PRODUCT#PRD-000001 (17,000)"

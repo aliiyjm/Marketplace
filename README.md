@@ -116,7 +116,7 @@ python -m pytest -q
 ## Security measures
 
 - CSRF token on every form; strict Content-Security-Policy (no inline JS/CSS), `X-Frame-Options`, `nosniff`.
-- Passwords hashed with scrypt; 5 failed sign-ins lock the email for 15 minutes; same message for unknown email and wrong password.
+- Passwords hashed with Argon2id (OWASP first choice); older scrypt hashes are upgraded automatically on the next sign-in; 5 failed sign-ins lock the email for 15 minutes; same message for unknown email and wrong password.
 - Session renewed on sign-in; user reloaded on each request; `?next=` only accepts local paths.
 - Roles checked on the server (`login_required`, `seller_required`, `admin_required`).
 - Ownership checks: buyers only see their orders and invoices; sellers only edit their products (`seller_id` always comes from the session).

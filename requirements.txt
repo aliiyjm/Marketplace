@@ -1,5 +1,7 @@
 Flask>=3.1,<4
 requests>=2.32,<3
+# password hashing (Argon2id)
+argon2-cffi>=23,<26
 # product photos: validated and re-encoded (metadata removed) before upload
 Pillow>=11.0,<13
 # database drivers (only needed when FINANCE_BACKEND=mysql / OPERATIONS_BACKEND=postgres)

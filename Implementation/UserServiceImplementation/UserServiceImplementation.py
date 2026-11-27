@@ -69,6 +69,15 @@ class UserServiceImplementation:
         existing.update(name=form.name, email=form.email, role=form.role)
         self.repo.update_user(existing)
 
+    def set_password_hash(self, user_id, password_hash):
+        """Replace only the password hash (used to upgrade scrypt -> Argon2id)."""
+        existing = self.repo.get_user(user_id)
+        if existing is None:
+            raise ValidationError("That user no longer exists.")
+        existing.pop("nombre", None)
+        existing["password_hash"] = password_hash
+        self.repo.update_user(existing)
+
     def delete(self, user_id):
         if self.repo.get_user(user_id) is None:
             raise ValidationError("That user no longer exists.")
