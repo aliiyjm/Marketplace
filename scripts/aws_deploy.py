@@ -7,8 +7,8 @@ TEMPORARY credentials of AWS Academy Learner Lab (no IAM changes needed).
 
 What it does (all idempotent: running it again changes nothing that is already right):
   1. API Gateway (HTTP API of API_URL): finds the Lambda integration the routes use
-     and creates the missing routes (19) on that same integration; deploys the stage
-     if it has no auto-deploy.
+     and creates the missing routes (19) on that same integration; limits the stage to
+     50 requests/s (bursts of 100); deploys the stage if it has no auto-deploy.
   2. Lambda: uploads lambda_deploy/lambda_function.py, memory 256 MB (Learner Lab
      limit 128-256), timeout 30 s, adds MARKETPLACE_BUCKET to the environment and
      keeps every other variable (their values are never printed). Allows ONLY this
@@ -44,6 +44,7 @@ LAMBDA_FILE = ROOT / "lambda_deploy" / "lambda_function.py"
 LAMBDA_MEMORY = 256          # Learner Lab rule: 128-256 MB
 LAMBDA_TIMEOUT = 30
 PERMISSION_ID = "marketplace-http-api"
+THROTTLING = (50, 100)      # API Gateway: requests per second, burst
 ROUTES = (
     "GET /productos/consultar", "POST /productos/agregar", "PUT /productos/modificar",
     "DELETE /productos/eliminar", "POST /productos/stock", "POST /productos/cargar",
@@ -184,11 +185,22 @@ class Deployer:
 
     def stage(self, gw, api_id):
         stages = list(_all(gw.get_stages, ApiId=api_id))
-        if any(s.get("AutoDeploy") for s in stages):
-            self.ok("stage with auto-deploy: route changes are live")
-            return
         if not stages:
             self.bad("the API has no stage: create one ($default with auto-deploy) in the console")
+            return
+        for st in stages:
+            settings = st.get("DefaultRouteSettings") or {}
+            if (settings.get("ThrottlingRateLimit"), settings.get("ThrottlingBurstLimit")) == THROTTLING:
+                self.ok(f"stage {st['StageName']}: at most {THROTTLING[0]} requests/s (bursts of {THROTTLING[1]})")
+            else:
+                self.todo(f"stage {st['StageName']}: limit to {THROTTLING[0]} requests/s, bursts of {THROTTLING[1]} "
+                          "(protects the credit from request floods)")
+                if self.apply:
+                    gw.update_stage(ApiId=api_id, StageName=st["StageName"],
+                                    DefaultRouteSettings=dict(settings, ThrottlingRateLimit=THROTTLING[0],
+                                                              ThrottlingBurstLimit=THROTTLING[1]))
+        if any(s.get("AutoDeploy") for s in stages):
+            self.ok("stage with auto-deploy: route changes are live")
             return
         name = stages[0]["StageName"]
         self.todo(f"deploy stage {name}")

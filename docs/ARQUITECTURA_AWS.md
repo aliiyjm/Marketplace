@@ -36,12 +36,12 @@ flowchart LR
 
 | Componente | Configuración | Por qué |
 |---|---|---|
-| **API Gateway** (HTTP API) | 19 rutas, todas a la misma integración de la Lambda, etapa con auto-deploy | Un solo punto de entrada a DynamoDB/S3; la app no guarda credenciales de AWS |
+| **API Gateway** (HTTP API) | 19 rutas, todas a la misma integración de la Lambda, etapa con auto-deploy, **límite de 50 peticiones/s (ráfagas de 100)** | Un solo punto de entrada a DynamoDB/S3; la app no guarda credenciales de AWS |
 | **Lambda** `CRUD_Marketplace` | Python, **256 MB**, timeout 30 s, rol **LabRole**, variables `MARKETPLACE_TABLE`, `MARKETPLACE_GSI`, `MARKETPLACE_API_KEY`, `MARKETPLACE_BUCKET` | Límite del lab: 128-256 MB; solo esta API puede invocarla |
 | **DynamoDB** `MarketplaceDB` | On-Demand, PK/SK + GSI1 | Catálogo masivo y transacciones rápidas; sin capacidad aprovisionada que gaste crédito |
 | **S3** | Bloqueo de ACLs, política de solo lectura de `products/*` | Las fotos se leen directo del bucket; subir y borrar solo lo hace la Lambda |
-| **RDS MySQL** `db-finance` | `db.t4g.micro`, 20 GB | Datos financieros con transacciones ACID y stored procedures |
-| **RDS PostgreSQL** `db-operations` | `db.t4g.micro`, 20 GB | Catálogos, reseñas y analítica con funciones de reporte |
+| **RDS MySQL** `db-finance` | `db.t4g.micro`, 20 GB, almacenamiento cifrado; Security Group: puerto 3306 solo para la IP del equipo de desarrollo | Datos financieros con transacciones ACID y stored procedures |
+| **RDS PostgreSQL** `db-operations` | `db.t4g.micro`, 20 GB, almacenamiento cifrado; Security Group: puerto 5432 solo para la IP del equipo de desarrollo | Catálogos, reseñas y analítica con funciones de reporte |
 | **CloudWatch** | Logs de la Lambda | Los errores internos se registran ahí; al cliente solo le llega `Internal error.` |
 
 **Configuración sin direcciones fijas:** la app lee todos los endpoints de `.env` (`API_URL`, `MYSQL_HOST`,

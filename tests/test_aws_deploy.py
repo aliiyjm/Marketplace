@@ -70,8 +70,14 @@ class FakeGateway:
     def create_route(self, ApiId, RouteKey, Target):
         self.created.append((RouteKey, Target))
 
+    throttling = {}
+
     def get_stages(self, ApiId):
-        return {"Items": [{"StageName": "$default", "AutoDeploy": True}]}
+        return {"Items": [{"StageName": "$default", "AutoDeploy": True,
+                           "DefaultRouteSettings": dict(self.throttling)}]}
+
+    def update_stage(self, ApiId, StageName, DefaultRouteSettings):
+        self.throttling = DefaultRouteSettings
 
 
 class FakeLambda:
@@ -141,3 +147,16 @@ def test_missing_api_key_in_the_lambda_is_reported():
     d, lines = deployer(False, FakeGateway(ROUTES), lam)
     d.lambda_function(FN_ARN, "photos")
     assert d.problems == 1 and any("MARKETPLACE_API_KEY" in line for line in lines)
+
+
+def test_stage_gets_a_request_limit_once():
+    gw = FakeGateway(ROUTES)
+    d, _ = deployer(False, gw, FakeLambda())
+    d.stage(gw, "abc")
+    assert d.changes == 1 and gw.throttling == {}                 # check mode: nothing changes
+    d, _ = deployer(True, gw, FakeLambda())
+    d.stage(gw, "abc")
+    assert gw.throttling == {"ThrottlingRateLimit": 50, "ThrottlingBurstLimit": 100}
+    d, _ = deployer(True, gw, FakeLambda())
+    d.stage(gw, "abc")
+    assert d.changes == 0                                         # idempotent

@@ -5,7 +5,7 @@
 
 | Hace | Detalle |
 |---|---|
-| API Gateway | Crea las rutas que falten (19) en **la misma** integración de la Lambda; despliega la etapa si no tiene auto-deploy |
+| API Gateway | Crea las rutas que falten (19) en **la misma** integración de la Lambda; limita la etapa a **50 peticiones/s** (ráfagas de 100); despliega la etapa si no tiene auto-deploy |
 | Lambda | Sube `lambda_deploy/lambda_function.py`, memoria **256 MB** (límite del lab 128-256), timeout 30 s, agrega `MARKETPLACE_BUCKET` **sin tocar** las demás variables; solo tu API puede invocarla |
 | S3 | Crea el bucket de fotos, lectura pública **solo** de `products/*`, ACLs bloqueadas |
 | `.env` | Escribe `PRODUCT_IMAGES_URL` (la CSP lo necesita) |
