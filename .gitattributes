@@ -1,0 +1,9 @@
+# GitHub language statistics: count only hand-written code.
+# These files are DATA or GENERATED code; they stay in the repository but GitHub
+# excludes them from the language bar and collapses them in diffs.
+
+# Initial data (27,068 reviews, categories, sellers...) written by scripts/export_seed_sql.py
+database/operations_seed.sql linguist-generated=true
+
+# Single-file Lambda assembled from the project layers by scripts/build_single_file_lambda.py
+lambda_deploy/lambda_function.py linguist-generated=true
